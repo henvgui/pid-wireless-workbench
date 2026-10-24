@@ -1,0 +1,614 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PID Workbench local hardware API",
+    "version": "2026.10.24.3",
+    "description": "Hardware-specific workbench: PC -> ESP32 host USB -> ESP-NOW -> ESP32 slave -> UART / SWD -> target MCU. SWD supports F407VGT6/VET6; VET6 physical validation passed, VGT6 pending. No computer-side ST-Link route."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18765"
+    }
+  ],
+  "security": [
+    {
+      "LocalToken": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "LocalToken": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "paths": {
+    "/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities",
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/ports": {
+      "get": {
+        "operationId": "listPorts",
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/device": {
+      "get": {
+        "operationId": "readDeviceState",
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        },
+        "parameters": [
+          {
+            "name": "port",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "auto"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      },
+      "post": {
+        "operationId": "startJob",
+        "description": "One active job. Reuse idempotency_key only for the identical request; completed/failed jobs are returned without rerunning.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "flash",
+                      "echo",
+                      "pid",
+                      "run",
+                      "stop",
+                      "save",
+                      "load"
+                    ]
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "chip": {
+                    "type": "string",
+                    "enum": [
+                      "STM32F103C8T6",
+                      "STM32G431CBT6",
+                      "STM32G431C8T6",
+                      "STM32G431C6T6",
+                      "STM32G431KBU6",
+                      "STM32F407VGT6",
+                      "STM32F407VET6"
+                    ]
+                  },
+                  "transport": {
+                    "type": "string",
+                    "const": "esp_now",
+                    "default": "esp_now",
+                    "description": "PC -> host USB -> ESP-NOW -> slave -> target interface -> target MCU"
+                  },
+                  "target_interface": {
+                    "type": "string",
+                    "enum": [
+                      "uart",
+                      "swd"
+                    ],
+                    "description": "Slave-side target interface. F407 defaults to SWD; others default to UART. Check chips.interfaces; SWD supports F407VGT6/VET6 with current host/slave firmware. VET6 has passed physical validation; VGT6 remains pending."
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "wireless_uart",
+                      "wireless_swd"
+                    ],
+                    "description": "Compatibility alias for the slave target interface; must agree with target_interface when both are supplied."
+                  },
+                  "firmware": {
+                    "type": "string",
+                    "description": "Absolute local .bin path, linked at 0x08000000"
+                  },
+                  "expected_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "port": {
+                    "type": "string",
+                    "default": "auto",
+                    "description": "ESP32 host USB COM port for every target interface. Slave USB and unrelated adapters are rejected."
+                  },
+                  "run": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 16384
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4194304
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "p": {
+                        "type": "number"
+                      },
+                      "i": {
+                        "type": "number"
+                      },
+                      "d": {
+                        "type": "number"
+                      },
+                      "step": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "p",
+                      "i",
+                      "d",
+                      "step"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "idempotency_key"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "action": {
+                          "const": "flash"
+                        }
+                      }
+                    },
+                    "then": {
+                      "required": [
+                        "chip",
+                        "firmware"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "400": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "409": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "501": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{24}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/plan": {
+      "post": {
+        "operationId": "validateFirmwarePlan",
+        "description": "Validate local firmware, vectors and SHA256 without accessing or writing the target.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "flash",
+                      "echo",
+                      "pid",
+                      "run",
+                      "stop",
+                      "save",
+                      "load"
+                    ]
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "chip": {
+                    "type": "string",
+                    "enum": [
+                      "STM32F103C8T6",
+                      "STM32G431CBT6",
+                      "STM32G431C8T6",
+                      "STM32G431C6T6",
+                      "STM32G431KBU6",
+                      "STM32F407VGT6",
+                      "STM32F407VET6"
+                    ]
+                  },
+                  "transport": {
+                    "type": "string",
+                    "const": "esp_now",
+                    "default": "esp_now",
+                    "description": "PC -> host USB -> ESP-NOW -> slave -> target interface -> target MCU"
+                  },
+                  "target_interface": {
+                    "type": "string",
+                    "enum": [
+                      "uart",
+                      "swd"
+                    ],
+                    "description": "Slave-side target interface. F407 defaults to SWD; others default to UART. Check chips.interfaces; SWD supports F407VGT6/VET6 with current host/slave firmware. VET6 has passed physical validation; VGT6 remains pending."
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "wireless_uart",
+                      "wireless_swd"
+                    ],
+                    "description": "Compatibility alias for the slave target interface; must agree with target_interface when both are supplied."
+                  },
+                  "firmware": {
+                    "type": "string",
+                    "description": "Absolute local .bin path, linked at 0x08000000"
+                  },
+                  "expected_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "port": {
+                    "type": "string",
+                    "default": "auto",
+                    "description": "ESP32 host USB COM port for every target interface. Slave USB and unrelated adapters are rejected."
+                  },
+                  "run": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 16384
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4194304
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "p": {
+                        "type": "number"
+                      },
+                      "i": {
+                        "type": "number"
+                      },
+                      "d": {
+                        "type": "number"
+                      },
+                      "step": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "p",
+                      "i",
+                      "d",
+                      "step"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "chip",
+                  "firmware"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "action": {
+                          "const": "flash"
+                        }
+                      }
+                    },
+                    "then": {
+                      "required": [
+                        "chip",
+                        "firmware"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "400": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "501": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/serial/configure": {
+      "post": {
+        "operationId": "configureSerialLog",
+        "description": "Wireless UART: H2 TX17/RX18 bidirectional, H1 RX44 logs, or internal loopback with target isolated. Shares flash hardware gate.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "session"
+                ],
+                "properties": {
+                  "session": {
+                    "type": "string",
+                    "pattern": "^(?!00000000)[0-9a-f]{8}$"
+                  },
+                  "port": {
+                    "type": "string",
+                    "default": "auto"
+                  },
+                  "baud": {
+                    "type": "integer",
+                    "minimum": 1200,
+                    "maximum": 921600,
+                    "default": 115200
+                  },
+                  "bits": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 8,
+                    "default": 8
+                  },
+                  "parity": {
+                    "type": "string",
+                    "enum": [
+                      "N",
+                      "O",
+                      "E"
+                    ],
+                    "default": "N"
+                  },
+                  "stop": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2
+                    ],
+                    "default": 1
+                  },
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "h1",
+                      "h2",
+                      "loopback"
+                    ],
+                    "default": "h1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "409": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/serial/close": {
+      "post": {
+        "operationId": "closeSerialLog",
+        "description": "Wireless UART: H2 TX17/RX18 bidirectional, H1 RX44 logs, or internal loopback with target isolated. Shares flash hardware gate.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "session"
+                ],
+                "properties": {
+                  "session": {
+                    "type": "string",
+                    "pattern": "^(?!00000000)[0-9a-f]{8}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "409": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/serial/read": {
+      "get": {
+        "operationId": "readSerialLog",
+        "description": "Returns raw hex chunks, next_cursor, explicit gaps, dropped bytes and UART error events. Reuse the same cursor after a lost response; never silently advance it.",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?!00000000)[0-9a-f]{8}$"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "409": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/serial/status": {
+      "get": {
+        "operationId": "serialLogStatus",
+        "description": "Local receiver session/config, closed flag, last error/read time and byte count. Does not access hardware. Not proof of current target UART output.",
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    },
+    "/v1/serial/send": {
+      "post": {
+        "operationId": "sendWirelessSerial",
+        "description": "H2 only. 1..1024 raw bytes as hex. Keep the same session, key and payload when retrying; never retry uncertain data with a new key. ACK means queued in slave UART, not processed by target. Idempotency lasts for the current live backend/slave session; restart requires application-level reconciliation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "session",
+                  "idempotency_key",
+                  "hex"
+                ],
+                "properties": {
+                  "session": {
+                    "type": "string",
+                    "pattern": "^(?!00000000)[0-9a-f]{8}$"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "hex": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2048,
+                    "pattern": "^(?:[0-9a-fA-F]{2})+$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          },
+          "409": {
+            "description": "JSON envelope: ok/data on success; ok/error with code/message on failure"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+validation/*.exe
+validation/*.bin
+g431_transfer.json
+stm32_transfer.json
