@@ -1,0 +1,88 @@
+[
+  {
+    "original": "PID_P启停_I模式_修改前备份_20261023.zip",
+    "original_sha256": "a70c15f0b4a60581df7fae96b7d44b861d7ca34a051eec2fedbc1bd9d6ee1400",
+    "archive": "PID_P启停_I模式_修改前备份_20261023-source-only.zip",
+    "sha256": "4d2c1360738b273fb0bd2749cf680720d5cd42d3249eb7f2b94882229854229e",
+    "files": 1600,
+    "excluded": {
+      "binary_cache_or_unsupported": 33,
+      "private_or_machine_local": 8
+    },
+    "bytes": 9514347
+  },
+  {
+    "original": "PID_P按键S弯版本_恢复前备份_20261024.zip",
+    "original_sha256": "69b3c2f71c68165ed8d2e5675052ebc221623b0f0cedf837c016308c7f344ab3",
+    "archive": "PID_P按键S弯版本_恢复前备份_20261024-source-only.zip",
+    "sha256": "a9e8586d4b05aed87fc849c8beea21ce2abd68b1a90f64fbbbe177c662ac285a",
+    "files": 1575,
+    "excluded": {
+      "binary_cache_or_unsupported": 11,
+      "private_or_machine_local": 8
+    },
+    "bytes": 9365710
+  },
+  {
+    "original": "PID_无线串口版_20261024.zip",
+    "original_sha256": "61944ab7d1f1ed59bf2545b91f7a00177262ee057fb5cf000d76ba657b3803f1",
+    "archive": "PID_无线串口版_20261024-source-only.zip",
+    "sha256": "625e54741401b1258882bd49467ee0f981f191753c5aae8c880b2deeb0d2f184",
+    "files": 2239,
+    "excluded": {
+      "private_or_machine_local": 22,
+      "binary_cache_or_unsupported": 263
+    },
+    "bytes": 22132937
+  },
+  {
+    "original": "PID_无线烧录已验证_20261023_1838.zip",
+    "original_sha256": "8b9d9b44eb660e94509319c9e999297e37ebb4d4171567dce6a3ba3d77ac2430",
+    "archive": "PID_无线烧录已验证_20261023_1838-source-only.zip",
+    "sha256": "4b182fe00001ebf556e41174201217af7d99b0fd802124057f059523d5854235",
+    "files": 1600,
+    "excluded": {
+      "binary_cache_or_unsupported": 33,
+      "private_or_machine_local": 8
+    },
+    "bytes": 9514337
+  },
+  {
+    "original": "PID_无线烧录提速版_20261024.zip",
+    "original_sha256": "2fd5fd0247e1b786f175c80fdcd46fc5aa845fbd49dfe9ef95ebf6d6b7bbd998",
+    "archive": "PID_无线烧录提速版_20261024-source-only.zip",
+    "sha256": "f7eabc52ada965bc91f6f84387719a322014ead84f0cc423deb7da5f333220ea",
+    "files": 1633,
+    "excluded": {
+      "binary_cache_or_unsupported": 46,
+      "private_or_machine_local": 22
+    },
+    "bytes": 11101501
+  },
+  {
+    "original": "PID_项目修复_实板已验证_20261024.zip",
+    "original_sha256": "77ce710ca62350919104289c21112f23680ce524c57ba3acc11f72ede872edf2",
+    "archive": "PID_项目修复_实板已验证_20261024-source-only.zip",
+    "sha256": "1f2a7f5092c9adcc7f7060cdf6cc31732d37bdedfab3e5b067947e3a299a5ee9",
+    "files": 2301,
+    "excluded": {
+      "private_or_machine_local": 22,
+      "binary_cache_or_unsupported": 284,
+      "embedded_pairing_key": 1
+    },
+    "bytes": 23399158
+  },
+  {
+    "original": "PID_项目检查修复版_20261024.zip",
+    "original_sha256": "cd7f009c3f0ce37da64abf97f21d619fc54e471b9076cb3e47d0e5788ce14637",
+    "archive": "PID_项目检查修复版_20261024-source-only.zip",
+    "sha256": "4a83c2f9b979a84d3861eee3d87034c389d7498e473429aff2bd3e86734b4ec5",
+    "files": 2270,
+    "excluded": {
+      "private_or_machine_local": 22,
+      "binary_cache_or_unsupported": 281,
+      "embedded_pairing_key": 1
+    },
+    "bytes": 22773571
+  }
+]

@@ -54,6 +54,7 @@ namespace PidWorkbench
         {
             SuspendLayout();
             Text="PID 调试工作台 · 烧录与 AI 自动化";Font=new Font("Microsoft YaHei UI",9.5f);
+            Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             AutoScaleDimensions=new SizeF(96,96);AutoScaleMode=AutoScaleMode.Dpi;
             BackColor=Background;ForeColor=Ink;ClientSize=new Size(1220,830);MinimumSize=new Size(960,650);StartPosition=FormStartPosition.CenterScreen;
             Build();

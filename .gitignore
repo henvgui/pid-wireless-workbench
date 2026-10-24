@@ -5,6 +5,7 @@
 !/README.md
 !/docs/
 !/scripts/
+!/archives/
 !/ESP32_S3_RGB_Chase/
 !/ESP32_S3_Slave_Diagnostic/
 !/PID_Shared/
@@ -53,6 +54,10 @@ hosts.yml
 *.pem
 *.pfx
 *.p12
+
+# Historical desktop snapshots: sanitized source and documents only.
+!/archives/desktop-snapshots/
+!/archives/desktop-snapshots/*.zip
 
 # Keep the printable manual referenced by the Workbench README.
 !/PID_Workbench/output/

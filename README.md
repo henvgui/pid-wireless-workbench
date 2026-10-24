@@ -24,6 +24,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 | F407 的 SWD 接线 | [F407 接线表](PID_Workbench/docs/F407_SWD_WIRING.md) |
 | 已验证范围、已修问题与限制 | [检查记录](PID_Workbench/docs/PROJECT_AUDIT_20261024.md) |
 | 首次构建、更换电脑与源码管理 | [开发与配置说明](docs/DEVELOPMENT.md) |
+| 桌面历史备份的源码归档 | [历史版本索引](archives/desktop-snapshots/README.md) |
 
 ## 当前功能
 
@@ -49,7 +50,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 | `STM32F407_UART_ECHO` | F407VET6 回传测试应用 |
 | `scripts` | 不操作硬件的测试入口 |
 
-用户的车辆业务工程与原始 PCB 工程没有复制进本仓库；本机历史实验、原始验证日志、打包备份和编译产物保留在原目录中。
+当前源码目录不包含用户的车辆业务工程与原始 PCB 工程。桌面历史备份中的旧版代码与文档单独保存在 `archives/desktop-snapshots`（部分含旧车辆工程）；这些历史快照不替代当前源码。含密钥、固件及编译产物的完整原包保留在本地项目备份目录。
 
 ## 快速构建
 
@@ -65,6 +66,8 @@ $env:PID_WORKBENCH_PYTHON = (Get-Command python).Source
 & .\PID_Workbench\build.ps1
 & .\PID_Workbench\PID_Workbench.exe
 ```
+
+编译后运行 `& .\PID_Workbench\install-desktop.ps1` 创建带专属图标的桌面快捷方式。图标提供 16–256 像素尺寸，源图见 `PID_Workbench/assets/workbench.svg`；可用 `scripts/make_icon.ps1` 重新生成。
 
 以上 ESP32 命令仅编译。接入其他板子前先核对 MAC、USB 身份、端口、引脚和供电，再明确执行上传；当前代码绑定这套已验证的主从硬件。
 
