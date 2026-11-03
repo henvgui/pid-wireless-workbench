@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-03",
+  "chip": "STM32F407VET6",
+  "flash_kb": 512,
+  "size": 10268,
+  "sha256": "75499360af00bf881e38459a5f22a59859f8029322237b0912541379058d0a35",
+  "swd_half_period_us": 2,
+  "block_bytes": 1024,
+  "loader_bytes": 476,
+  "ramcheck": {
+    "type": "ramcheck",
+    "error": "ok",
+    "flash_written": false,
+    "target_halted": true
+  },
+  "direct_commands": {
+    "legacy_seconds": 9.82799999999952,
+    "ram_seconds": 4.186999999999898,
+    "speedup": 2.347265345115777,
+    "legacy_target_seconds": 9.188000000000102,
+    "ram_target_seconds": 3.42200000000048
+  },
+  "keil_api": {
+    "baseline_job": "8ecf01783ce4499ced7b6f72",
+    "baseline_seconds": 9.845497,
+    "ram_job": "75c3f7485d7526b91c3acb15",
+    "ram_seconds": 4.092997,
+    "speedup": 2.4054493565472925,
+    "verified": true,
+    "start_ack": true,
+    "algorithm": "ram_1k",
+    "transfer": {
+      "mode": "bulk_window8",
+      "bytes": 10268,
+      "seconds": 0.40600000000085856,
+      "radio_retries": 0,
+      "usb_batch": 3072,
+      "window": 8,
+      "injected_data_drops": 0,
+      "injected_ack_drops": 0,
+      "kib_per_second": 24.69789100979999
+    },
+    "events": [
+      "2026-11-03T04:45:26.091955+00:00 [erase] Stage=2 bytes=0/10268",
+      "2026-11-03T04:45:26.356482+00:00 [erase] Stage=2 bytes=0/10268",
+      "2026-11-03T04:45:26.619828+00:00 [write] Stage=3 bytes=2048/10268",
+      "2026-11-03T04:45:26.881757+00:00 [write] Stage=3 bytes=3072/10268",
+      "2026-11-03T04:45:27.142205+00:00 [write] Stage=3 bytes=5120/10268",
+      "2026-11-03T04:45:27.404299+00:00 [write] Stage=3 bytes=6144/10268",
+      "2026-11-03T04:45:27.665587+00:00 [write] Stage=3 bytes=8192/10268",
+      "2026-11-03T04:45:27.930123+00:00 [write] Stage=3 bytes=9216/10268",
+      "2026-11-03T04:45:28.190767+00:00 [verify] Stage=4 bytes=1280/10268",
+      "2026-11-03T04:45:28.453498+00:00 [verify] Stage=4 bytes=3584/10268",
+      "2026-11-03T04:45:28.713905+00:00 [verify] Stage=4 bytes=6144/10268",
+      "2026-11-03T04:45:28.980251+00:00 [verify] Stage=4 bytes=8448/10268",
+      "2026-11-03T04:45:29.243994+00:00 [start] Stage=5 bytes=10268/10268",
+      "2026-11-03T04:45:29.249312+00:00 [start] Target algorithm=ram_1k erase/write/full-readback/start=3.422s"
+    ]
+  },
+  "esp_firmware": [
+    {
+      "role": "slave",
+      "sha256": "5d4a2064a91a4e3ac7085541cb7c888cd2e8747fcf4827200ff968656ca8c7bd",
+      "written_and_hash_verified": true
+    },
+    {
+      "role": "host",
+      "sha256": "3ef3c46ecbc2ca0176f05ef91942e24bb4143a6fc3435bc38868d22a06134186",
+      "written_and_hash_verified": true
+    }
+  ],
+  "software_tests": {
+    "native_groups": 16,
+    "python_tests": 117
+  },
+  "limits": [
+    "Physical Flash validation used this identical 10268-byte application only.",
+    "F407VG and large Flash writes have native coverage but no new physical Flash validation.",
+    "No voltage, SWD clock, target option bytes or application source changes."
+  ],
+  "final_confirmation": {
+    "job": "0309ea94c82287cfec6c5ab0",
+    "seconds": 4.186042,
+    "algorithm": "ram_1k",
+    "verified": true,
+    "start_ack": true
+  },
+  "wireless_serial_loopback": {
+    "passed": true,
+    "bytes": 1024,
+    "duplicate_send_tx_total": 1024,
+    "sha256": "f1305624e9a6d905a63dc5ec25bee729df52db7ce7ff2c25716dd91303e8a699",
+    "target_isolated": true
+  },
+  "parameters_preserved": true
+}

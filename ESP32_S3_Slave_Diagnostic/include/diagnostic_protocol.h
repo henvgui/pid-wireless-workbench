@@ -2,7 +2,7 @@
 #include <cstdint>
 
 namespace diagnostic {
-enum class Kind { Invalid, Ping, Info, Status, Pins, Rgb, Off, Auto, Watch, Help, Link, Radio, Swd, SwdCheck, SwdHold, SwdRelease, SwdProbe, SwdUnprotect };
+enum class Kind { Invalid, Ping, Info, Status, Pins, Rgb, Off, Auto, Watch, Help, Link, Radio, Swd, SwdCheck, SwdHold, SwdRelease, SwdProbe, SwdUnprotect, RamCheck };
 struct Command {
   Kind kind = Kind::Invalid;
   uint8_t red = 0, green = 0, blue = 0;

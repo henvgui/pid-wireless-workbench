@@ -28,6 +28,7 @@
 **/results/
 **/*_validation_*.json
 !/PID_Workbench/docs/assets/bulk_validation_20261103.json
+!/PID_Workbench/docs/assets/ram_validation_20261103.json
 /PID_Workbench/PID_Workbench.audit.exe.config
 *.pyc
 *.pyo

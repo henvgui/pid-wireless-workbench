@@ -23,7 +23,7 @@ const char* kFirmware="slave_flash_psram";
 #else
 const char* kFirmware="slave_flash";
 #endif
-const char* kVersion="20261103.1";
+const char* kVersion="20261103.2";
 const char* kRadio="espnow";
 #elif defined(PID_LINK_ENABLED)
 const char* kFirmware="slave_wireless";
@@ -198,6 +198,17 @@ void execute(Console& console) {
   }
   using diagnostic::Kind;
   switch (command.kind) {
+    case Kind::RamCheck:
+#if defined(PID_FLASH_ENABLED)
+      {
+        const auto error=pidflash::checkSwdRam();
+        console.reply("{\"type\":\"ramcheck\",\"error\":\"%s\",\"flash_written\":false,\"target_halted\":%s}",
+            pidflash::errorName(error),error==pidflash::Error::Ok?"true":"false");
+      }
+#else
+      console.reply("{\"type\":\"error\",\"code\":\"programmer_not_built\"}");
+#endif
+      break;
     case Kind::SwdUnprotect:
 #if defined(PID_FLASH_ENABLED)
       {

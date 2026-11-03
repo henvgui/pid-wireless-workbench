@@ -142,10 +142,13 @@ def main():
     parser.add_argument("--journal", type=Path, default=Path("stm32_transfer.json"))
     parser.add_argument("--timeout", type=float, help="Programming timeout; defaults to 180s for F103/G431, 1800s for F407")
     parser.add_argument("--legacy", action="store_true", help="Use the prior per-packet transfer for comparison")
+    parser.add_argument("--swd-legacy", action="store_true", help="F407 SWD: use the prior word-by-word programmer; requires updated host/slave")
     parser.add_argument("--bulk-drop-every", type=int, default=0, help="Staging-only test: deliberately drop every Nth radio data/ACK; 0 disables")
     args = parser.parse_args()
     if args.run and not args.execute:
         parser.error("--run requires --execute")
+    if args.swd_legacy and (args.interface != "swd" or not args.execute):
+        parser.error("--swd-legacy requires --interface swd --execute")
     if not 0<=args.bulk_drop_every<=255 or args.bulk_drop_every and (args.execute or args.legacy):
         parser.error("--bulk-drop-every must be 0..255 and is staging-only, without --execute/--legacy")
     image = args.binary.read_bytes()
@@ -245,6 +248,8 @@ def main():
             return
         if not status.get("target_enabled"):
             raise RuntimeError("Slave is staging-only; build slave_flash for target programming")
+        if args.swd_legacy and not status.get("swd_ram"):
+            raise RuntimeError("Updated host/slave required to explicitly select the legacy SWD programmer; no erase dispatched")
         drain_deadline = time.monotonic()+30
         while status.get("serial_waiting"):
             if time.monotonic() > drain_deadline:
@@ -252,7 +257,8 @@ def main():
             time.sleep(.05)
             status = link.fw(f"!fw status {tid}", transfer, 5)
         flash_dispatched = True  # Even a lost ACK may mean erase/program started.
-        status = link.fw(f"!fw flash {tid} ERASE" + (" RUN" if args.run else ""), transfer, 4)
+        program_started = time.monotonic()
+        status = link.fw(f"!fw flash {tid} ERASE" + (" RUN" if args.run else "") + (" LEGACY" if args.swd_legacy else ""), transfer, 4)
         record["executed"] = True
         save()
         deadline = time.monotonic()+(args.timeout or (1800 if target["id"] in (3, 4) else 180))
@@ -267,6 +273,9 @@ def main():
         if status["state"] != "done" or status["job_error"] != "ok":
             raise RuntimeError(status)
         record["verified"] = True
+        record["target_program_seconds"] = time.monotonic()-program_started
+        record["algorithm"] = status.get("swd_algorithm", "legacy_word" if args.interface=="swd" else "uart_rom")
+        print("Target algorithm="+record["algorithm"]+" erase/write/full-readback/start=%.3fs"%record["target_program_seconds"],flush=True)
         if args.run:
             acknowledged = status.get("start_ack") if args.interface=="swd" else status.get("go_ack")
             if not acknowledged:

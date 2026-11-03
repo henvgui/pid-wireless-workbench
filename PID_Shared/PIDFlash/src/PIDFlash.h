@@ -25,6 +25,8 @@ SwdDiagnostics swdDiagnostics();
 // Fixed read-only F407 diagnosis. Pulses reset and halts the core; no Flash/RAM writes.
 // Leaves the target halted so an unverified application is never started.
 Error probeSwdTarget(uint32_t* values,size_t count);
+// SRAM write/read + no-Flash-write algorithm probe. Resets/halts F407VE only.
+Error checkSwdRam();
 // Explicit full-erasure recovery, never part of normal programming.
 Error recoverSwdTarget();
 // Brief static input-path check, no target reset or clock pulses; restores OE#.

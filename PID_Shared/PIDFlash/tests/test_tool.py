@@ -63,6 +63,33 @@ class FakeLink(tool.Link):
 
 
 class ToolTests(unittest.TestCase):
+    def test_swd_manual_legacy_flag_and_capability_gate(self):
+        for supported in (False,True):
+            class F407Link(FakeLink):
+                def query(self, command, *args, **kwargs):
+                    value=super().query(command,*args,**kwargs)
+                    if command.startswith('!fw'):
+                        value.update(target_enabled=True,swd_ram=supported)
+                    if command.startswith('!fw flash'):
+                        assert command.endswith(' RUN LEGACY')
+                        value.update(state='done',job_error='ok',start_ack=True,swd_algorithm='legacy_word')
+                    return value
+            with tempfile.TemporaryDirectory() as directory:
+                binary=Path(directory)/'app.bin';binary.write_bytes(image())
+                journal=Path(directory)/'record.json'
+                args=['flash_stm32.py',str(binary),'--part','STM32F407VET6','--interface','swd','--execute','--run','--swd-legacy','--journal',str(journal)]
+                with patch.object(sys,'argv',args),patch.object(tool,'Link',F407Link),contextlib.redirect_stdout(io.StringIO()):
+                    if supported:tool.main()
+                    else:
+                        with self.assertRaises(RuntimeError):tool.main()
+                commands=F407Link.instances[-1].commands
+                self.assertEqual(sum(c.startswith('!fw flash') for c in commands),int(supported))
+                record=json.loads(journal.read_text())
+                if supported:self.assertEqual(record['algorithm'],'legacy_word');self.assertTrue(record['verified'] and record['start_ack'])
+    def test_swd_manual_flag_requires_executing_swd(self):
+        for suffix in ([],['--execute'],['--interface','swd']):
+            with patch.object(sys,'argv',['flash_stm32.py','unused.bin','--swd-legacy']+suffix),contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):tool.main()
     def test_failed_transfer_releases_staging_without_erase(self):
         class InterruptedLink(FakeLink):
             def query(self, command, *args, **kwargs):

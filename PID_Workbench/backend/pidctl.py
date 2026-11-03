@@ -24,6 +24,7 @@ def flash_options(parser):
     parser.add_argument("--port", default="auto", help="ESP32 主机 USB 端口，默认自动识别")
     parser.add_argument("--expected-sha256")
     parser.add_argument("--no-run", action="store_true")
+    parser.add_argument("--swd-legacy", action="store_true", help="F407 SWD 手动使用旧的逐字写入算法")
 
 
 def job_options(parser):
@@ -108,6 +109,7 @@ def main():
             if args.method: spec["method"] = args.method
             if args.target_interface: spec["target_interface"] = args.target_interface
             if args.expected_sha256: spec["expected_sha256"] = args.expected_sha256
+            if args.swd_legacy: spec["swd_legacy"] = True
         elif args.command == "echo":
             if args.text is not None: spec["text"] = args.text
             elif args.file: spec["file"] = args.file

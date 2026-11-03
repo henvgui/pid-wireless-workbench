@@ -59,6 +59,8 @@ Error workerError=Error::Ok,lastJobError=Error::Ok;
 std::atomic<uint16_t> workerDevice{0};
 std::atomic<uint16_t> workerFlashKb{0};
 bool runAfterProgram=false;
+bool legacySwdProgram=false;
+std::atomic<bool> workerUsedRam{false};
 std::atomic<bool> goAcknowledged{false};
 std::atomic<uint32_t> swdDpidr{0},swdTrace{0};
 std::atomic<uint32_t> swdCapacityWord{0},swdOptionBytes{0};
@@ -136,7 +138,8 @@ void programWorker(void*) {
       targetEnabled.store(true);digitalWrite(47,LOW);
       TargetSwd pins;ArmSwd arm(pins);F407Swd programmer(arm,staging.target);
       const bool recovery=swdRecoveryState.load()==1;
-      workerError=recovery?programmer.removeReadProtection():programmer.program(image,staging.size,progress);
+      workerError=recovery?programmer.removeReadProtection():programmer.program(image,staging.size,progress,legacySwdProgram);
+      workerUsedRam.store(programmer.usedRam);
       workerDevice=programmer.deviceId;workerFlashKb=programmer.flashKb;
       swdCapacityWord.store(programmer.capacityWord);swdOptionBytes.store(programmer.optionBytes);
       swdOptionBytesAfter.store(programmer.optionBytesAfter);
@@ -190,7 +193,7 @@ void makeReply(const Packet& request,Error error,Packet& response) {
   response.sender=e.session();response.peer=request.sender;response.transfer=request.transfer;
   response.sequence=request.sequence;response.offset=staging.received;response.length=32;
   response.data[0]=uint8_t(staging.state);response.data[1]=uint8_t(error);
-  response.data[2]=progressStage.load();response.data[3]=(PID_FLASH_TARGET_ENABLE?1:0)|(goAcknowledged.load()?2:0)|4|(serialbridge::waitingTx()?8:0)|16;
+  response.data[2]=progressStage.load();response.data[3]=(PID_FLASH_TARGET_ENABLE?1:0)|(goAcknowledged.load()?2:0)|4|(serialbridge::waitingTx()?8:0)|16|32|(workerUsedRam.load()?64:0);
   put32(response.data+4,staging.size);put32(response.data+8,progressBytes.load());
   put32(response.data+12,workerDevice.load());put32(response.data+16,uint32_t(lastJobError));
   put32(response.data+20,uint32_t(staging.target));
@@ -462,7 +465,7 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
         }
         error=staging.begin(p.transfer,requestedSize,kb,p.data+8,selected,interface);
         if(error==Error::Ok){bulkSlaveActive=bulkAckPending=false;bulkSlaveBitmap=0;serialbridge::poll(now,true);}
-        if(error==Error::Ok&&prior!=p.transfer){lastJobError=Error::Ok;workerDevice=0;workerFlashKb=0;goAcknowledged.store(false);progress(0,0);}
+        if(error==Error::Ok&&prior!=p.transfer){lastJobError=Error::Ok;workerDevice=0;workerFlashKb=0;workerUsedRam.store(false);goAcknowledged.store(false);progress(0,0);}
       }
       break;
     case Op::BulkOpen:
@@ -476,7 +479,8 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
     case Op::Flash:
       if(echoActive||uartActive){error=Error::Busy;break;}
       if(p.transfer!=staging.transfer){error=Error::WrongTransfer;break;}
-      if(p.length>1||(p.length==1&&p.data[0]!=1)){error=Error::Invalid;break;}
+      if(p.length>1||(p.length==1&&(!p.data[0]||(p.data[0]&~3u)))||
+          (p.length==1&&(p.data[0]&2)&&staging.interface!=Interface::Swd)){error=Error::Invalid;break;}
       if(staging.state==State::Programming||staging.state==State::Done||staging.state==State::Failed){error=Error::Ok;break;}
       if(staging.state!=State::Ready||e.mirror().run){error=Error::Busy;break;}
       if(!serialbridge::readyForFlash()){error=Error::Busy;break;}
@@ -485,7 +489,8 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
       // Latch before acknowledging: duplicate Flash cannot schedule another erase.
       staging.state=State::Programming;lastJobError=Error::Ok;workerDone.store(false);progress(0,0);
       swdRecoveryState.store(0);
-      runAfterProgram=p.length==1;goAcknowledged.store(false);
+      runAfterProgram=p.length==1&&(p.data[0]&1);legacySwdProgram=p.length==1&&(p.data[0]&2);
+      workerUsedRam.store(false);goAcknowledged.store(false);
       xTaskNotifyGive(worker);error=Error::Ok;break;
     case Op::Query:
       if(!p.length)error=p.transfer==staging.transfer?Error::Ok:Error::WrongTransfer;
@@ -571,7 +576,7 @@ void onAuxTransmitted(const uint8_t* bytes,size_t n,uint32_t now) {
 void beginHost(){pidlink::radio.setAuxReceiver(hostReceive);pidlink::radio.setAuxTransmitted(onAuxTransmitted);}
 void beginSlave(){
   pidlink::radio.setAuxReceiver(slaveReceive);
-  if(PID_FLASH_TARGET_ENABLE)xTaskCreatePinnedToCore(programWorker,"stm32_rom",4096,nullptr,1,&worker,0);
+  if(PID_FLASH_TARGET_ENABLE)xTaskCreatePinnedToCore(programWorker,"stm32_rom",6144,nullptr,1,&worker,0);
 }
 void pollSlave(uint32_t now) {
   if(bulkSlaveActive&&bulkAckPending&&uint32_t(now-bulkLastAck)>=8&&sendBulkAck()){bulkAckPending=false;bulkPackets=0;bulkLastAck=now;}
@@ -661,6 +666,24 @@ Error probeSwdTarget(uint32_t* values,size_t count) {
   if(error==Error::Ok)error=arm.write32(0xe000ed0c,0x05fa0004);
   if(error==Error::Ok)pins.wait(20);
   for(size_t i=0;i<n&&error==Error::Ok;++i)error=arm.read32(addresses[i],values[n+i]);
+  digitalWrite(47,HIGH);targetEnabled.store(false);
+  pinMode(slavepins::kSwdClock,INPUT);pinMode(slavepins::kSwdData,INPUT);pinMode(15,INPUT);pinMode(21,INPUT_PULLUP);
+  return error;
+}
+Error checkSwdRam() {
+  if(!PID_FLASH_TARGET_ENABLE)return Error::Disabled;
+  if(staging.busy()||staging.state==State::Receiving||staging.state==State::Ready||echoActive||uartActive||
+      serialbridge::ownsPort()||swdHoldUntil||pidlink::radio.engine().mirror().run)return Error::Busy;
+  motorbridge::pause(millis());
+  digitalWrite(47,HIGH);pinMode(47,OUTPUT);digitalWrite(21,LOW);pinMode(21,OUTPUT);
+  digitalWrite(15,LOW);pinMode(15,OUTPUT);pinMode(16,INPUT);
+  pinMode(17,INPUT_PULLUP);pinMode(18,INPUT_PULLUP);pinMode(slavepins::kSwo,INPUT);
+  digitalWrite(slavepins::kSwdClock,LOW);pinMode(slavepins::kSwdClock,OUTPUT);pinMode(slavepins::kSwdData,INPUT);
+  targetEnabled.store(true);digitalWrite(47,LOW);
+  TargetSwd pins;ArmSwd arm(pins);F407Swd programmer(arm,Target::F407VE);
+  const Error error=programmer.ramCheck();
+  swdDpidr.store(arm.debugPortId);
+  swdTrace.store(uint32_t(arm.lastAck)|(uint32_t(arm.lastRequest)<<8)|(uint32_t(arm.connectStep)<<16)|(uint32_t(error)<<24));
   digitalWrite(47,HIGH);targetEnabled.store(false);
   pinMode(slavepins::kSwdClock,INPUT);pinMode(slavepins::kSwdData,INPUT);pinMode(15,INPUT);pinMode(21,INPUT_PULLUP);
   return error;
@@ -787,8 +810,11 @@ bool hostCommand(const char* text) {
       if(!std::strcmp(w[1],"seal")){p.op=Op::Seal;valid=true;}
       else if(!std::strcmp(w[1],"status")){p.op=Op::Query;valid=true;}
       else if(!std::strcmp(w[1],"abort")){p.op=Op::Abort;valid=true;}
-    } else if((count==4||count==5)&&!std::strcmp(w[1],"flash")&&!std::strcmp(w[3],"ERASE")) {
-      if(count==4||!std::strcmp(w[4],"RUN")){p.op=Op::Flash;valid=true;if(count==5){p.length=1;p.data[0]=1;}}
+    } else if(count>=4&&count<=6&&!std::strcmp(w[1],"flash")&&!std::strcmp(w[3],"ERASE")) {
+      uint8_t flags=0;valid=true;
+      for(unsigned i=4;i<count;++i){const uint8_t flag=!std::strcmp(w[i],"RUN")?1:!std::strcmp(w[i],"LEGACY")?2:0;
+        if(!flag||(flags&flag)){valid=false;break;}flags|=flag;}
+      if(valid){p.op=Op::Flash;if(flags){p.length=1;p.data[0]=flags;}}
     }
   }
   if(!valid){localError(Error::Invalid,p.transfer);return true;}
@@ -876,7 +902,7 @@ bool takeHostReply(char* out,size_t size) {
   const bool swd=Interface(get32(p.data+28))==Interface::Swd;
   snprintf(out,size,"{\"type\":\"fw\",\"id\":%lu,\"request\":%lu,\"op\":%u,\"offset\":%lu,\"ok\":%s,\"error\":\"%s\",\"state\":\"%s\","
       "\"received\":%lu,\"size\":%lu,\"stage\":%u,\"progress\":%lu,\"device_id\":%lu,\"actual_flash_kb\":%lu,\"job_error\":\"%s\","
-      "\"target_enabled\":%s,\"go_ack\":%s,\"target\":\"%s\",\"profile\":%lu,\"interface\":\"%s\",\"start_ack\":%s,\"retries\":%lu,\"total_retries\":%lu,\"max_chunk\":%u,\"serial_waiting\":%s,\"bulk_window\":%u}",
+      "\"target_enabled\":%s,\"go_ack\":%s,\"target\":\"%s\",\"profile\":%lu,\"interface\":\"%s\",\"start_ack\":%s,\"retries\":%lu,\"total_retries\":%lu,\"max_chunk\":%u,\"serial_waiting\":%s,\"bulk_window\":%u,\"swd_ram\":%s,\"swd_algorithm\":\"%s\"}",
       static_cast<unsigned long>(p.transfer),static_cast<unsigned long>(p.sequence),unsigned(outgoing.op),
       static_cast<unsigned long>(outgoing.offset),p.data[1]==0?"true":"false",
       errorName(Error(p.data[1])),stateName(State(p.data[0])),static_cast<unsigned long>(p.offset),
@@ -885,7 +911,8 @@ bool takeHostReply(char* out,size_t size) {
       !swd&&(p.data[3]&2)?"true":"false",
       target?target->name:"unknown",static_cast<unsigned long>(get32(p.data+20)),
       swd?"swd":"uart",(p.data[3]&2)?"true":"false",
-      static_cast<unsigned long>(replyRetries),static_cast<unsigned long>(retries),unsigned((p.data[3]&4)?kChunk:kLegacyChunk),(p.data[3]&8)?"true":"false",unsigned((p.data[3]&16)?bulk::kWindow:0));
+      static_cast<unsigned long>(replyRetries),static_cast<unsigned long>(retries),unsigned((p.data[3]&4)?kChunk:kLegacyChunk),(p.data[3]&8)?"true":"false",unsigned((p.data[3]&16)?bulk::kWindow:0),
+      (p.data[3]&32)?"true":"false",swd?((p.data[3]&64)?"ram_1k":"legacy_word"):"uart_rom");
   return true;
 }
 } // namespace pidflash

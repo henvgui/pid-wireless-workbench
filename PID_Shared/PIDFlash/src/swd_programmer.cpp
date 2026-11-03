@@ -1,4 +1,7 @@
 #include "swd_programmer.h"
+#include "f407_loader_image.h"
+#include "../ram_loader/f407_loader.h"
+#include <cstring>
 namespace pidflash {
 namespace {
 constexpr uint32_t kDhcsr=0xe000edf0,kDemcr=0xe000edfc;
@@ -59,6 +62,63 @@ Error ArmSwd::write32(uint32_t address,uint32_t value) {
   if(address&3)return Error::Invalid;
   Error e=put(true,4,address);if(e!=Error::Ok)return e;
   e=put(true,12,value);return e==Error::Ok?status():e;
+}
+Error ArmSwd::writeBlock(uint32_t address,const uint32_t* values,size_t words) {
+  if(!values||!words||(address&3)||words>(UINT32_MAX-address)/4u+1u)return Error::Invalid;
+  for(size_t offset=0;offset<words;) {
+    const uint32_t current=address+uint32_t(offset*4);
+    size_t count=(1024u-(current&1023u))/4u;if(count>words-offset)count=words-offset;
+    Error e=put(true,4,current);if(e!=Error::Ok)return e;
+    for(size_t i=0;i<count;++i){e=put(true,12,values[offset+i]);if(e!=Error::Ok)return e;}
+    // Drain posted AP writes before observing sticky bus errors or changing TAR.
+    uint32_t ignored=0;e=transfer(false,true,12,ignored);if(e!=Error::Ok)return e;
+    e=status();if(e!=Error::Ok)return e;offset+=count;
+  }
+  return Error::Ok;
+}
+Error ArmSwd::coreRegister(uint8_t index,uint32_t& value,bool write) {
+  Error e=Error::Ok;
+  if(write)e=write32(0xe000edf8,value);
+  if(e==Error::Ok)e=write32(0xe000edf4,uint32_t(index)|(write?0x10000u:0));
+  if(e!=Error::Ok)return e;
+  const uint32_t start=now();
+  for(;;) {
+    uint32_t status=0;e=read32(kDhcsr,status);if(e!=Error::Ok)return e;
+    if(!(status&(1u<<17)))return Error::SwdProtocol;
+    if(status&(1u<<16))break;
+    if(uint32_t(now()-start)>=100)return Error::Timeout;
+    wait(1);
+  }
+  return write?Error::Ok:read32(0xe000edf8,value);
+}
+Error ArmSwd::runAlgorithm(uint32_t entry,uint32_t stack,uint32_t argument,uint32_t breakpoint,uint32_t timeout) {
+  // Fixed reserved main-SRAM layout; never execute a supplied Flash address.
+  if(entry!=RAM_CODE||stack!=RAM_STACK||argument!=RAM_MAILBOX||
+      breakpoint<RAM_CODE||breakpoint>=RAM_CODE+2048||!timeout||timeout>5000)return Error::Invalid;
+  uint32_t status=0;Error e=read32(kDhcsr,status);if(e!=Error::Ok)return e;
+  if(!(status&(1u<<17)))return Error::Busy;
+  e=write32(kDhcsr,0xa05f000b);if(e!=Error::Ok)return e; // Mask interrupts while halted.
+  const uint8_t registers[]={0,13,14,15,16};
+  uint32_t values[]={argument,stack,entry|1u,entry|1u,1u<<24};
+  for(size_t i=0;i<5;++i){e=coreRegister(registers[i],values[i],true);if(e!=Error::Ok)return e;}
+  // Clear stale reset status before starting. Never replay after uncertain ACK.
+  e=read32(kDhcsr,status);if(e!=Error::Ok)return e;
+  e=write32(kDhcsr,0xa05f0009);
+  if(e!=Error::Ok){write32(kDhcsr,0xa05f000b);return e;}
+  const uint32_t started=now();
+  for(;;) {
+    e=read32(kDhcsr,status);if(e!=Error::Ok)break;
+    if(status&((1u<<19)|(1u<<25))){e=Error::SwdProtocol;break;}
+    if(status&(1u<<17)) {
+      uint32_t pc=0;e=coreRegister(15,pc,false);if(e!=Error::Ok)break;
+      if((pc&~1u)!=breakpoint&&(pc&~1u)!=breakpoint+2)e=Error::SwdProtocol;
+      return e;
+    }
+    if(uint32_t(now()-started)>=timeout){e=Error::Timeout;break;}
+    wait(1);
+  }
+  write32(kDhcsr,0xa05f000b); // Best effort halt; caller must not start unverified code.
+  return e;
 }
 Error ArmSwd::readBlock(uint32_t address,uint32_t* values,size_t words) {
   if(!values||!words||(address&3)||words>(UINT32_MAX-address)/4u+1u)return Error::Invalid;
@@ -129,7 +189,10 @@ Error ArmSwd::connect() {
 }
 Error ArmSwd::start() {
   pins_.reset(true);
-  Error e=write32(kDemcr,0);if(e!=Error::Ok)return e;
+  // C_MASKINTS survives the RAM call. Change it only with C_HALT set,
+  // then release halt/reset; changing both in the resume write is undefined.
+  Error e=write32(kDhcsr,0xa05f0003);if(e!=Error::Ok)return e;
+  e=write32(kDemcr,0);if(e!=Error::Ok)return e;
   e=write32(kDhcsr,0xa05f0001);if(e!=Error::Ok)return e;
   pins_.reset(false);pins_.wait(10);
   uint32_t state=0;e=read32(kDhcsr,state);if(e!=Error::Ok)return e;
@@ -144,7 +207,7 @@ Error F407Swd::ready(uint32_t timeout) {
     target_.wait(1);
   }
 }
-Error F407Swd::execute(const uint8_t* image,uint32_t size,Progress progress) {
+Error F407Swd::identify() {
   Error e=target_.connect();if(e!=Error::Ok)return e;
   uint32_t value=0;e=target_.read32(0xe0042000,value);if(e!=Error::Ok)return e;
   deviceId=uint16_t(value&0xfff);if(deviceId!=0x413)return Error::Device;
@@ -158,6 +221,61 @@ Error F407Swd::execute(const uint8_t* image,uint32_t size,Progress progress) {
     // memory. Never erase based on a profile override in that condition.
     return Error::Capacity;
   }
+  return Error::Ok;
+}
+Error F407Swd::prepareRam() {
+  if(!target_.supportsRam())return Error::Unsupported;
+  Error e=target_.writeBlock(RAM_CODE,kRamCode,sizeof(kRamCode)/4);if(e!=Error::Ok)return e;
+  uint32_t check[64];
+  for(size_t offset=0;offset<sizeof(kRamCode)/4;offset+=64) {
+    const size_t n=sizeof(kRamCode)/4-offset<64?sizeof(kRamCode)/4-offset:64;
+    e=target_.readBlock(RAM_CODE+uint32_t(offset*4),check,n);if(e!=Error::Ok)return e;
+    for(size_t i=0;i<n;++i)if(check[i]!=kRamCode[offset+i])return Error::Verify;
+  }
+  return callRam(RAM_PROBE,0,nullptr,0);
+}
+Error F407Swd::callRam(uint32_t command,uint32_t address,const uint32_t* data,uint32_t words) {
+  static_assert(sizeof(RamMailbox)==52,"SRAM mailbox ABI");
+  if(words>RAM_BLOCK/4||((command==RAM_PROGRAM||command==RAM_CHECK)&&(!data||!words)))return Error::Invalid;
+  if(words){const Error e=target_.writeBlock(RAM_DATA,data,words);if(e!=Error::Ok)return e;}
+  if(!++nonce_)++nonce_;
+  RamMailbox box={RAM_MAGIC,command,address,words*4,RAM_DATA,
+    words?crc32(reinterpret_cast<const uint8_t*>(data),words*4):0,nonce_,0,0,0,0,0,kBase+uint32_t(flashKb)*1024u};
+  uint32_t mailbox[sizeof(box)/4];std::memcpy(mailbox,&box,sizeof(box));
+  Error e=target_.writeBlock(RAM_MAILBOX,mailbox,sizeof(box)/4);
+  if(e!=Error::Ok)return e;
+  e=target_.runAlgorithm(kRamEntry,RAM_STACK,RAM_MAILBOX,kRamBreakpoint,2000);if(e!=Error::Ok)return e;
+  e=target_.readBlock(RAM_MAILBOX,mailbox,sizeof(box)/4);if(e!=Error::Ok)return e;
+  std::memcpy(&box,mailbox,sizeof(box));
+  ramResult=box.result;ramStatus=box.flash_status;
+  if(box.magic!=RAM_MAGIC||box.command!=command||box.address!=address||box.length!=words*4||box.buffer!=RAM_DATA||
+      box.nonce!=nonce_||box.returned_nonce!=(nonce_^RAM_NONCE_XOR)||box.state!=RAM_DONE||
+      box.flash_limit!=kBase+uint32_t(flashKb)*1024u)return Error::SwdProtocol;
+  if(box.result==RAM_BUSY_TIMEOUT)return Error::Timeout;
+  if(box.result==RAM_CRC)return Error::Verify;
+  if(box.result)return Error::FlashStatus;
+  return box.processed==(command==RAM_PROGRAM?words*4:0)?Error::Ok:Error::Incomplete;
+}
+Error F407Swd::ramCheck() {
+  verified_=false;usedRam=false;ramResult=ramStatus=0;
+  if(!isF407(selected_))return Error::Invalid;
+  Error e=identify();if(e!=Error::Ok)return e;
+  // Exercise TAR wrap with three chunks crossing multiple 1 KiB boundaries.
+  uint32_t data[128],readback[128];
+  for(unsigned chunk=0;chunk<3;++chunk) {
+    for(unsigned i=0;i<128;++i)data[i]=(0x5a69c30fu^((chunk*128u+i)*0x9e3779b9u));
+    const uint32_t address=0x200023fcu+chunk*512;
+    e=target_.writeBlock(address,data,128);if(e!=Error::Ok)return e;
+    e=target_.readBlock(address,readback,128);if(e!=Error::Ok)return e;
+    for(unsigned i=0;i<128;++i)if(data[i]!=readback[i])return Error::Verify;
+  }
+  e=prepareRam();if(e!=Error::Ok)return e;
+  for(unsigned i=0;i<128;++i)data[i]=0xa5a50000u+i;
+  e=callRam(RAM_CHECK,0,data,128);usedRam=e==Error::Ok;return e;
+}
+Error F407Swd::execute(const uint8_t* image,uint32_t size,Progress progress) {
+  Error e=identify();if(e!=Error::Ok)return e;
+  uint32_t value=0;
   // Freeze watchdogs while the core is halted, and invalidate/disable ART caches.
   e=target_.read32(0xe0042008,value);if(e!=Error::Ok)return e;
   e=target_.write32(0xe0042008,value|0x1800);if(e!=Error::Ok)return e;
@@ -166,6 +284,11 @@ Error F407Swd::execute(const uint8_t* image,uint32_t size,Progress progress) {
   e=target_.write32(kFlashAcr,value|0x1800);if(e!=Error::Ok)return e;
   e=target_.write32(kFlashAcr,value);if(e!=Error::Ok)return e;
   e=ready(1000);if(e!=Error::Ok)return e;
+  if(!legacy_&&target_.supportsRam()) {
+    // Load, read back and execute a no-write probe BEFORE unlocking/erasing.
+    e=prepareRam();if(e!=Error::Ok)return e;
+    usedRam=true;
+  }
   e=target_.read32(kFlashCr,value);if(e!=Error::Ok)return e;
   if(value&0x80000000) {
     e=target_.write32(kFlashKey,0x45670123);if(e!=Error::Ok)return e;
@@ -183,7 +306,16 @@ Error F407Swd::execute(const uint8_t* image,uint32_t size,Progress progress) {
     e=ready(10000);if(e!=Error::Ok)return e;
   }
   e=target_.write32(kFlashCr,kWord|1);if(e!=Error::Ok)return e;
-  for(uint32_t offset=0;offset<size;offset+=4) {
+  if(usedRam) {
+    uint32_t buffer[RAM_BLOCK/4];
+    for(uint32_t offset=0;offset<size;offset+=RAM_BLOCK) {
+      const uint32_t length=size-offset<RAM_BLOCK?size-offset:RAM_BLOCK;
+      for(uint32_t i=0;i<(length+3)/4;++i)buffer[i]=0xffffffff;
+      for(uint32_t i=0;i<length;++i)buffer[i/4]=(buffer[i/4]&~(255u<<(8*(i%4))))|(uint32_t(image[offset+i])<<(8*(i%4)));
+      e=callRam(RAM_PROGRAM,kBase+offset,buffer,(length+3)/4);if(e!=Error::Ok)return e;
+      if(progress)progress(3,offset+length);
+    }
+  } else for(uint32_t offset=0;offset<size;offset+=4) {
     uint32_t word=0xffffffff;
     for(uint32_t i=0;i<4&&offset+i<size;++i)word=(word&~(0xffu<<(8*i)))|(uint32_t(image[offset+i])<<(8*i));
     e=target_.write32(kBase+offset,word);if(e!=Error::Ok)return e;
@@ -201,8 +333,9 @@ Error F407Swd::execute(const uint8_t* image,uint32_t size,Progress progress) {
   }
   return Error::Ok;
 }
-Error F407Swd::program(const uint8_t* image,uint32_t size,Progress progress) {
+Error F407Swd::program(const uint8_t* image,uint32_t size,Progress progress,bool legacy) {
   verified_=unlocked_=false;deviceId=flashKb=0;capacityWord=optionBytes=0;
+  usedRam=false;ramResult=ramStatus=nonce_=0;legacy_=legacy;
   if(!isF407(selected_)||!vectorsValid(image,size,selected_))return Error::Invalid;
   if(progress)progress(1,0);
   const Error e=execute(image,size,progress);

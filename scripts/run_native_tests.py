@@ -29,6 +29,7 @@ cases.extend([
     ('pid_link', [link/'tests/core_test.cpp', link/'src/pid_link_core.cpp'], [link/'src']),
     ('flash_core', [flash/'tests/native_test.cpp', flash/'src/flash_core.cpp', flash/'src/stm32_rom.cpp'], [flash/'src']),
     ('swd', [flash/'tests/swd_test.cpp', flash/'src/flash_core.cpp', flash/'src/swd_programmer.cpp'], [flash/'src']),
+    ('ram_loader', [flash/'tests/ram_loader_test.cpp', flash/'src/flash_core.cpp', flash/'src/swd_programmer.cpp'], [flash/'src']),
     ('serial_ring', [flash/'tests/serial_log_test.cpp', flash/'src/flash_core.cpp'], [flash/'src']),
     ('serial_tx', [flash/'tests/serial_tx_test.cpp'], [flash/'src']),
     ('echo', [flash/'tests/echo_test.cpp', flash/'src/echo_target.c', flash/'src/flash_core.cpp'], [flash/'src']),

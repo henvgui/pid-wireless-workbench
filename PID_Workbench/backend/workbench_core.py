@@ -23,7 +23,7 @@ from flash_stm32 import Link, target_profile, validate_image
 from serial.tools import list_ports
 from serial_terminal import SerialTerminal
 
-VERSION = "2026.11.03.1"
+VERSION = "2026.11.03.2"
 DATA_DIR = Path(os.environ.get("PID_WORKBENCH_DATA", str(Path(os.environ.get("LOCALAPPDATA", APP_DIR)) / "PIDWorkbench")))
 CHIPS = [{"id": name, "label": name, "flash_kb": kb, "profile": profile,
           "device_id": ident, "interfaces": ["uart","swd"] if profile.startswith("f407") else ["uart"],
@@ -76,6 +76,8 @@ def capabilities():
             "firmware_transfer": {"negotiated": True,"radio_chunk_bytes":192,"window_packets":8,
                                   "usb_batch_bytes":3072,"host_cache_bytes":6144,"fallback":"legacy_stop_wait",
                                   "integrity":"packet_crc32 + staged_sha256 + full_target_readback"},
+            "swd_programmer": {"default":"ram_1k","block_bytes":1024,"chips":["STM32F407VET6","STM32F407VGT6"],
+                               "requires_updated_firmware":True,"manual_fallback":"swd_legacy=true","full_readback":True},
             "serial_log": {"available": True, "rx_pin": 44, "interface": "H1 UART0", "direction": "receive_only", "buffer_bytes": 32768},
             "wireless_serial": {"channels": ["h2", "h1", "loopback"], "tx_pin": 17, "rx_pin": 18,
                                 "max_send_bytes": 1024, "idempotency_required": True, "flash_pause_resume": True}}
@@ -127,6 +129,8 @@ def flash_method(spec):
 def canonical_plan(plan):
     """Keep completed UART job keys valid across the route-schema migration."""
     value = dict(plan)
+    if value.get("swd_legacy") is False:
+        value.pop("swd_legacy")
     if value.get("method") == "wireless_uart":
         value.setdefault("transport", "esp_now")
         value.setdefault("target_interface", "uart")
@@ -139,7 +143,7 @@ def prepare(spec):
     if not isinstance(spec, dict):
         raise ApiError("invalid_request", "任务必须为 JSON 对象。")
     allowed = {"action", "chip", "method", "transport", "target_interface", "firmware", "port", "run", "expected_sha256",
-               "idempotency_key", "text", "file", "bytes", "parameters"}
+               "idempotency_key", "text", "file", "bytes", "parameters", "swd_legacy"}
     if set(spec) - allowed:
         raise ApiError("unknown_field", "未知字段：" + ", ".join(sorted(set(spec)-allowed)))
     if spec.get("transport", "esp_now") != "esp_now":
@@ -149,6 +153,8 @@ def prepare(spec):
         raise ApiError("invalid_action", "不支持此操作。")
     if action != "flash" and any(field in spec for field in ("method", "target_interface")):
         raise ApiError("invalid_request", "target_interface / method 目前用于选择烧录接口；回传固定使用从机 UART。")
+    if "swd_legacy" in spec and (action != "flash" or not isinstance(spec["swd_legacy"],bool)):
+        raise ApiError("invalid_request", "swd_legacy 必须为布尔值，仅用于 flash。")
     result = {"action": action, "port": spec.get("port", "auto")}
     image = None
     if action == "flash":
@@ -156,6 +162,10 @@ def prepare(spec):
         if chip is None:
             raise ApiError("unsupported_chip", "请选择芯片目录中已适配的型号。")
         method = flash_method(spec)
+        if spec.get("swd_legacy"):
+            if method["target_interface"] != "swd":
+                raise ApiError("invalid_request", "swd_legacy 仅适用于 F407 SWD。")
+            result["swd_legacy"] = True
         path = Path(require_string(spec.get("firmware"), "firmware")).expanduser()
         if not path.is_absolute() or not path.is_file() or path.suffix.lower() != ".bin":
             raise ApiError("invalid_firmware", "请选择绝对路径的 .bin 文件，链接地址为 0x08000000。")
@@ -419,6 +429,7 @@ class Engine:
                             "--part", spec["chip"], "--interface", spec["target_interface"], "--execute", "--journal", str(result_path)]
                     if spec["port"] != "auto": args += ["--port", spec["port"]]
                     if spec["run"]: args += ["--run"]
+                    if spec.get("swd_legacy"): args += ["--swd-legacy"]
                     code = self.child(identifier, args)
                     result = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else {}
                     start_ok = result.get("start_ack") if spec["target_interface"]=="swd" else result.get("go_ack")

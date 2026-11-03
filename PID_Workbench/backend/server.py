@@ -39,7 +39,9 @@ def openapi():
                   "firmware": {"type": "string", "description": "Absolute local .bin path, linked at 0x08000000"},
                   "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                   "port": {"type": "string", "default": "auto", "description": "ESP32 host USB COM port for every target interface. Slave USB and unrelated adapters are rejected."},
-                  "run": {"type": "boolean", "default": True}, "text": {"type": "string", "maxLength": 16384},
+                  "run": {"type": "boolean", "default": True},
+                  "swd_legacy": {"type": "boolean", "default": False, "description": "F407 SWD only: manually use word programming instead of the 1 KiB SRAM algorithm. Requires updated host/slave; no automatic retry after an ambiguous Flash operation."},
+                  "text": {"type": "string", "maxLength": 16384},
                   "file": {"type": "string"}, "bytes": {"type": "integer", "minimum": 1, "maximum": 4194304},
                   "parameters": {"type": "object", "properties": {p: {"type": "number"} for p in ("p", "i", "d", "step")},
                                  "required": ["p", "i", "d", "step"], "additionalProperties": False}}

@@ -1,5 +1,7 @@
 # ESP32-S3 从机启动与指令测试
 
+20261103.2：`slave_flash_psram` / `slave_flash` 增加 F407 SRAM 块烧录器和 `!ramcheck`（复位暂停目标，仅修改 SRAM）。正常烧录保持完整读回和启动确认，详见 [算法与回退说明](../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。
+
 ## 2026-10-23：USB 自动下载
 
 在 VS Code 打开本工程，直接点 PlatformIO 的 **Upload**，或运行任务「从机：USB自动烧录（无需BOOT）」。默认环境为 `slave_flash_psram`，保留完整无线烧录、PID 转发和 PSRAM 支持。正常更新不需要手按 BOOT/RESET，完成后自动启动并通过 USB `!info` 确认应用运行。

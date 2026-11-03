@@ -32,6 +32,13 @@ class SwdTarget {
     if(e==Error::Ok)value=uint16_t(word>>((address&2)*8));return e;
   }
   virtual Error write32(uint32_t address,uint32_t value)=0;
+  virtual Error writeBlock(uint32_t address,const uint32_t* values,size_t words) {
+    if(!values||!words||(address&3)||words>(UINT32_MAX-address)/4u+1u)return Error::Invalid;
+    for(size_t i=0;i<words;++i){const Error e=write32(address+uint32_t(i*4),values[i]);if(e!=Error::Ok)return e;}
+    return Error::Ok;
+  }
+  virtual bool supportsRam() const { return false; }
+  virtual Error runAlgorithm(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t) {return Error::Unsupported;}
   virtual Error start()=0;
   virtual uint32_t now()=0;
   virtual void wait(uint32_t ms)=0;
@@ -45,6 +52,9 @@ class ArmSwd:public SwdTarget {
   Error readBlock(uint32_t address,uint32_t* values,size_t words) override;
   Error read16(uint32_t address,uint16_t& value) override;
   Error write32(uint32_t address,uint32_t value) override;
+  Error writeBlock(uint32_t address,const uint32_t* values,size_t words) override;
+  bool supportsRam() const override { return true; }
+  Error runAlgorithm(uint32_t entry,uint32_t stack,uint32_t argument,uint32_t breakpoint,uint32_t timeout) override;
   Error start() override;
   uint32_t now() override { return pins_.now(); }
   void wait(uint32_t ms) override { pins_.wait(ms); }
@@ -59,23 +69,33 @@ class ArmSwd:public SwdTarget {
   Error put(bool ap,uint8_t address,uint32_t value);
   Error posted(uint8_t address,uint32_t& value);
   Error status();
+  Error coreRegister(uint8_t index,uint32_t& value,bool write);
   SwdPins& pins_;
 };
 class F407Swd {
  public:
   explicit F407Swd(SwdTarget& target,Target selected=Target::F407VG):target_(target),selected_(selected) {}
-  Error program(const uint8_t* image,uint32_t size,Progress progress=nullptr);
+  Error program(const uint8_t* image,uint32_t size,Progress progress=nullptr,bool legacy=false);
+  // Resets/halts the target and changes SRAM only; leaves Flash untouched and core halted.
+  Error ramCheck();
   Error start();
   // Explicit recovery only: RDP=0xff -> 0xaa causes full user-Flash erasure.
   // Never called by program(); accepts only the confirmed F407VE profile.
   Error removeReadProtection();
   uint16_t deviceId=0,flashKb=0;
   uint32_t capacityWord=0,optionBytes=0,optionBytesAfter=0;
+  bool usedRam=false;
+  uint32_t ramResult=0,ramStatus=0;
  private:
+  Error identify();
+  Error prepareRam();
+  Error callRam(uint32_t command,uint32_t address,const uint32_t* data,uint32_t words);
   Error ready(uint32_t timeout);
   Error execute(const uint8_t* image,uint32_t size,Progress progress);
   SwdTarget& target_;
   Target selected_;
   bool verified_=false,unlocked_=false;
+  bool legacy_=false;
+  uint32_t nonce_=0;
 };
 } // namespace pidflash

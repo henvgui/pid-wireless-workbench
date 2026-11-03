@@ -142,6 +142,15 @@ class EngineTests(unittest.TestCase):
         self.binary.write_bytes(image(524289))
         with self.assertRaises(core.ApiError) as error:core.prepare(dict(self.spec,chip="STM32F407VET6",method="wireless_swd"))
         self.assertEqual(error.exception.code,'image_too_large')
+    def test_manual_swd_algorithm_selection_and_default_plan_compatibility(self):
+        spec=dict(self.spec,chip="STM32F407VET6",method="wireless_swd")
+        normal=core.prepare(spec)[0]
+        self.assertEqual(normal,core.prepare(dict(spec,swd_legacy=False))[0])
+        self.assertTrue(core.prepare(dict(spec,swd_legacy=True))[0]["swd_legacy"])
+        self.assertEqual(core.canonical_plan(dict(normal,swd_legacy=False)),normal)
+        for changes in ({"swd_legacy":"true"},{"swd_legacy":1},{"swd_legacy":True,"method":"wireless_uart"}):
+            with self.assertRaises(core.ApiError):core.prepare(dict(spec,**changes))
+        with self.assertRaises(core.ApiError):core.prepare({"action":"stop","swd_legacy":False})
     def test_only_host_usb_is_used_for_every_action(self):
         with patch.object(core,"ports",return_value=[{"port":"COM14","role":"host"},{"port":"COM18","role":"slave"},{"port":"COM7","role":"other"}]):
             for spec in (self.spec,{"action":"echo","text":"test"},{"action":"stop"}):
@@ -181,9 +190,9 @@ class EngineTests(unittest.TestCase):
             struct.pack_into('<I',data,0,stack);self.binary.write_bytes(data)
             with self.assertRaises(core.ApiError):core.prepare(spec)
     def test_f407_swd_worker_uses_radio_tool_and_requires_start_ack(self):
-        for accepted in (False,True):
-            engine=core.Engine(self.root/('accepted' if accepted else 'rejected'))
-            spec=dict(self.spec,chip='STM32F407VGT6',method='wireless_swd');plan,_=core.prepare(spec)
+        for accepted,legacy in ((False,False),(True,False),(True,True)):
+            engine=core.Engine(self.root/(('accepted' if accepted else 'rejected')+str(legacy)))
+            spec=dict(self.spec,chip='STM32F407VGT6',method='wireless_swd',swd_legacy=legacy);plan,_=core.prepare(spec)
             directory=engine.store.root;identifier='4'*24
             (directory/'firmware.bin').write_bytes(image())
             job={'id':identifier,'idempotency_key':'swd','fingerprint':'x','state':'queued','directory':str(directory),'spec':plan,'progress':0}
@@ -191,6 +200,7 @@ class EngineTests(unittest.TestCase):
             def child(identifier,args):
                 self.assertEqual(args[args.index('--interface')+1],'swd')
                 self.assertIn('flash_stm32.py',args[1]);self.assertIn('--execute',args)
+                self.assertEqual('--swd-legacy' in args,legacy)
                 (directory/'transfer.json').write_text(json.dumps({'verified':True,'start_ack':accepted,'go_ack':True,'target_interface':'swd'}))
                 return 0
             with patch.object(engine,'child',child):engine.worker(identifier)

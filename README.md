@@ -24,6 +24,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 | F407 的 SWD 接线 | [F407 接线表](PID_Workbench/docs/F407_SWD_WIRING.md) |
 | 已验证范围、已修问题与限制 | [检查记录](PID_Workbench/docs/PROJECT_AUDIT_20261024.md) |
 | 批量传输速度、丢包及恢复测试 | [2026-11-03 实板记录](PID_Workbench/docs/BULK_VALIDATION_20261103.md) |
+| F407 SRAM 块烧录与 Keil 提速 | [算法说明](PID_Shared/PIDFlash/RAM_PROGRAMMER.md)、[实板对比](PID_Workbench/docs/RAM_VALIDATION_20261103.md) |
 | 首次构建、更换电脑与源码管理 | [开发与配置说明](docs/DEVELOPMENT.md) |
 | 桌面历史备份的源码归档 | [历史版本索引](archives/desktop-snapshots/README.md) |
 
@@ -32,6 +33,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 - 主机：P/I/D/STEP 编码器、OLED、RUN/STOP、SAVE、本地参数保存、渐变呼吸/拖影 RGB、STEP 长按开关 RGB。
 - 主从：加密 ESP-NOW、状态同步与连接指示。
 - 无线烧录：从机 UART ROM 或 SWD 写入，镜像 SHA256 检查、完整读回校验、任务去重、Keil 接入及进度显示。
+- F407 SWD：SRAM 1 KiB 块烧录、目标侧缓冲 CRC、超时检查和手动旧算法；VET6 同一 10,268 B 镜像的 Keil 任务实测从 9.85 s 缩短至 4.09 s，仍完整读回后启动。
 - 固件传输：支持自动协商 USB 二进制批量和 8 包滑动窗口、乱序接收与缺包补发；旧版设备保留逐包模式。[协议与测试说明](PID_Shared/PIDFlash/BULK_TRANSFER.md)
 - 无线串口：H2 双向文本/HEX、串口格式与文本结尾、发送重试去重、烧录暂停/恢复；H1 单向日志。
 - 上位机：Windows GUI、CLI、本机认证 HTTP API；支持后台断线恢复。

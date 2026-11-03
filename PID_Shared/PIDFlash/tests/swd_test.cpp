@@ -88,6 +88,23 @@ std::vector<uint8_t> firmware(size_t size) {
 }
 }
 int main() {
+  {Pins pins;for(unsigned i=0;i<3;++i){pins.ack();pins.ack();pins.reply(0);}
+   pins.ack();pins.reply(0);pins.reply(0);pins.reply(0);ArmSwd arm(pins);
+   assert(arm.start()==Error::Ok&&pins.responses.empty()&&pins.resets==2&&pins.time==10);
+   assert(pins.sent(57,32)==0xa05f0003&&pins.sent(171,32)==0&&pins.sent(285,32)==0xa05f0001);}
+  {Pins pins;for(unsigned i=0;i<3;++i)pins.ack();pins.reply(0);pins.reply(0);
+   ArmSwd arm(pins);uint32_t words[]={123,456};assert(arm.writeBlock(0x20000000,words,2)==Error::Ok);
+   assert(pins.responses.empty()&&pins.sent(8,32)==0x20000000&&pins.sent(57,32)==123&&pins.sent(106,32)==456);}
+  {Pins pins;for(unsigned i=0;i<2;++i){pins.ack();pins.ack();pins.reply(0);pins.reply(0);}
+   ArmSwd arm(pins);uint32_t words[]={123,456};assert(arm.writeBlock(0x200003fc,words,2)==Error::Ok);
+   assert(pins.responses.empty()&&pins.sent(8,32)==0x200003fc&&pins.sent(138,32)==0x20000400);}
+  {Pins pins;pins.ack();pins.ack();pins.reply(0);pins.reply(0xa2);ArmSwd arm(pins);uint32_t word=0;
+   assert(arm.writeBlock(0x20000000,&word,1)==Error::SwdFault&&pins.responses.empty());}
+  {Pins pins;pins.ack();pins.ack(4);ArmSwd arm(pins);uint32_t words[]={123,456};
+   assert(arm.writeBlock(0x20000000,words,2)==Error::SwdFault&&pins.responses.empty());}
+  {Pins pins;ArmSwd arm(pins);uint32_t value=0;
+   assert(arm.writeBlock(1,&value,1)==Error::Invalid&&arm.writeBlock(0,&value,0)==Error::Invalid);
+   assert(arm.writeBlock(0,nullptr,1)==Error::Invalid&&arm.writeBlock(0xfffffffc,&value,2)==Error::Invalid&&pins.driven.empty());}
   {Pins pins;pins.ack();pins.reply(0xdeadbeef);pins.reply(0x11223344);pins.reply(0x55667788);pins.reply(0);
    ArmSwd arm(pins);uint32_t values[2]={};
    assert(arm.readBlock(0x08000000,values,2)==Error::Ok&&values[0]==0x11223344&&values[1]==0x55667788);

@@ -1,5 +1,7 @@
 # Keil 直接无线下载使用说明
 
+2026.11.03.2：更新主机与从机后，F407 SWD 自动使用 SRAM 1 KiB 块烧录器，Keil 的命令行及 Download 入口不变。烧录仍要求完整读回和启动确认；无线传输速度与目标 Flash 写入速度分别显示。算法与手动回退见 [SRAM 烧录器说明](../../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。
+
 更新：2026-10-19。当前工程：`C:/Users/twice/Desktop/STM32PRO/f407/MDK-ARM/f407.uvprojx`，Target 为 `f407`，芯片为 **STM32F407VET6，512 KiB**。
 
 ## 日常使用
