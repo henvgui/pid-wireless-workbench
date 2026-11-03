@@ -18,6 +18,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 | 内容 | 文档 |
 |---|---|
 | 日常界面与使用指南 | [工作台 README](PID_Workbench/README.md) |
+| 主机、从机原理图与 PCB 可编辑工程 | [硬件工程说明](hardware/README.md) |
 | AI 调用、串口读取游标及重试规则 | [AI 操作指南](PID_Workbench/AI_USAGE.md) |
 | H2 双向串口、H1 日志与接线 | [无线串口操作指南](PID_Workbench/docs/WIRELESS_SERIAL.md) |
 | 在 Keil 中点击 Download 无线烧录 | [Keil 接入](PID_Workbench/docs/KEIL_DOWNLOAD.md) |
@@ -50,12 +51,13 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 | `PID_Shared/PIDLink` | ESP-NOW 链路与本机配对密钥生成工具 |
 | `PID_Shared/PIDFlash` | 暂存、UART ROM、SWD、无线串口、回传协议与测试 |
 | `PID_Workbench` | Windows 上位机、API/CLI、Keil 适配器及手册 |
+| `hardware` | 嘉立创EDA `pid旋钮.eprj2`，含主机与从机原理图、PCB |
 | `STM32F103_PA3_HIGH` | F103 最小 GPIO 示例及回传示例所需启动代码 |
 | `STM32F103_UART_ECHO` | F103 回传测试应用 |
 | `STM32F407_UART_ECHO` | F407VET6 回传测试应用 |
 | `scripts` | 不操作硬件的测试入口 |
 
-当前源码目录不包含用户的车辆业务工程与原始 PCB 工程。桌面历史备份中的旧版代码与文档单独保存在 `archives/desktop-snapshots`（部分含旧车辆工程）；这些历史快照不替代当前源码。含密钥、固件及编译产物的完整原包保留在本地项目备份目录。
+可编辑主从机原理图与 PCB 已收录在 `hardware`，详见硬件说明和校验清单；原工程中的本地账户密码仅在上传副本中清除，设计数据保持一致。当前源码目录不包含用户的车辆业务工程。桌面历史备份中的旧版代码与文档单独保存在 `archives/desktop-snapshots`（部分含旧车辆工程）；这些历史快照不替代当前源码。含密钥、固件及编译产物的完整原包保留在本地项目备份目录。
 
 ## 快速构建
 

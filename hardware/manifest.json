@@ -1,0 +1,38 @@
+{
+  "file": "pid旋钮.eprj2",
+  "project": "pid旋钮",
+  "archived_on": "2026-11-03",
+  "source_bytes": 6672384,
+  "source_sha256": "662caf8066d211e6977766ed7d078353c2e6333570cc982ecead745ca6d3b6a8",
+  "uploaded_bytes": 6668288,
+  "uploaded_sha256": "e9b2b879a0b1cba82de6c4f920b2448c22ae3adef32c97b2f83daac7a54f9030",
+  "integrity_check": "ok",
+  "sanitization": {
+    "table": "users",
+    "field": "password",
+    "cleared_rows": 1,
+    "vacuumed": true,
+    "source_unchanged": true,
+    "all_other_logical_table_data_verified_identical": true
+  },
+  "boards": [
+    {
+      "board": "从机",
+      "schematics": [
+        "Schematic2"
+      ],
+      "pcbs": [
+        "PCB2"
+      ]
+    },
+    {
+      "board": "主机",
+      "schematics": [
+        "Schematic1"
+      ],
+      "pcbs": [
+        "PCB1"
+      ]
+    }
+  ]
+}

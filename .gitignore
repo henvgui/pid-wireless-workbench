@@ -4,6 +4,7 @@
 !/.gitattributes
 !/README.md
 !/docs/
+!/hardware/
 !/scripts/
 !/archives/
 !/ESP32_S3_RGB_Chase/
