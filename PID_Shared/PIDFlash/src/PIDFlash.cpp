@@ -66,6 +66,7 @@ std::atomic<uint32_t> swdDpidr{0},swdTrace{0};
 std::atomic<uint32_t> swdCapacityWord{0},swdOptionBytes{0};
 std::atomic<uint32_t> swdOptionBytesAfter{0};
 std::atomic<uint8_t> swdRecoveryState{0};
+std::atomic<uint32_t> swdStartTrace[8];
 uint32_t swdHoldUntil=0;
 bool echoLocked=false,echoActive=false,echoWaiting=false,echoCached=false;
 bool uartLocked=false,uartActive=false,uartCached=false;
@@ -147,6 +148,9 @@ void programWorker(void*) {
         workerError=programmer.start();goAcknowledged.store(workerError==Error::Ok);
         if(workerError==Error::Ok)progress(5,staging.size);
       }
+      const uint32_t startTrace[]={arm.startStep,arm.startResetSeen,arm.startBeforePc,arm.startBeforeSpecial,
+          arm.startPc,arm.startSp,arm.startSpecial,arm.startDhcsr};
+      for(unsigned i=0;i<8;++i)swdStartTrace[i].store(startTrace[i]);
       swdDpidr.store(arm.debugPortId);
       swdTrace.store(uint32_t(arm.lastAck)|(uint32_t(arm.lastRequest)<<8)|
           (uint32_t(arm.connectStep)<<16)|(uint32_t(workerError)<<24));
@@ -156,6 +160,7 @@ void programWorker(void*) {
       workerDone.store(true);continue;
     }
     digitalWrite(16,HIGH);pinMode(16,OUTPUT);
+    { // Destroy the UART owner before publishing completion to the other core.
     TargetUart transport;
     transport.uart.begin(115200,SERIAL_8E1,18,17);
     while(transport.uart.available())transport.uart.read();
@@ -174,6 +179,7 @@ void programWorker(void*) {
     // Default stays in ROM. ERASE RUN explicitly starts only after full readback.
     digitalWrite(47,HIGH);targetEnabled.store(false);
     transport.uart.end();
+    } // HardwareSerial::~HardwareSerial() calls end() again, including global UART1 teardown.
     pinMode(17,INPUT_PULLUP);pinMode(18,INPUT_PULLUP);
     pinMode(15,INPUT);pinMode(16,INPUT);pinMode(21,INPUT_PULLUP);
     workerDone.store(true);
@@ -691,6 +697,11 @@ Error checkSwdRam() {
 SwdDiagnostics swdDiagnostics(){
   const uint32_t packed=swdTrace.load();
   return {swdDpidr.load(),uint8_t(packed),uint8_t(packed>>8),uint8_t(packed>>16),Error(packed>>24),swdCapacityWord.load(),swdOptionBytes.load(),swdOptionBytesAfter.load(),swdRecoveryState.load()};
+}
+bool swdStartDiagnostics(uint32_t* values,size_t count){
+  if(!values||count!=8)return false;
+  for(unsigned i=0;i<8;++i)values[i]=swdStartTrace[i].load();
+  return true;
 }
 Error checkSwdInput(uint8_t& isolated,uint8_t& internalPullup,uint8_t& targetLevel,bool hold){
   if(staging.busy()||echoActive||uartActive||serialbridge::ownsPort()||targetEnabled.load())return Error::Busy;

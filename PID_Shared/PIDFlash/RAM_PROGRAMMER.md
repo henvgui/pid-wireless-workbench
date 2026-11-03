@@ -1,5 +1,7 @@
 # F407 SRAM 块烧录器
 
+20261103.3：RUN 阶段增加系统复位确认、Flash 入口/SP/中断上下文检查，修复下载显示成功但目标应用串口未恢复的问题。[修复与实板验收](../../PID_Workbench/docs/UART_RESUME_FIX_20261103.md)。
+
 2026-11-03，适配 F407VE（512 KiB）和 F407VG（1024 KiB），从机 H3 SWD 接线不变。VET6 是当前实板验收对象；VGT6 算法及容量检查已适配，尚未实板验收。
 
 电脑仍走「USB → 主机 → ESP-NOW → 从机」。本次改变的是最后一段 SWD 写入，USB/无线批量协议保持兼容。不需要在 STM32 Flash 安装额外 Bootloader。

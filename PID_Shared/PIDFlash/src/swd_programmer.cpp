@@ -188,15 +188,49 @@ Error ArmSwd::connect() {
   }
 }
 Error ArmSwd::start() {
-  pins_.reset(true);
-  // C_MASKINTS survives the RAM call. Change it only with C_HALT set,
-  // then release halt/reset; changing both in the resume write is undefined.
-  Error e=write32(kDhcsr,0xa05f0003);if(e!=Error::Ok)return e;
+  startStep=1;startResetSeen=false;
+  startBeforePc=startBeforeSpecial=startPc=startSp=startSpecial=startDhcsr=0;
+  uint32_t sp=0,pc=0;
+  Error e=read32(kBase,sp);if(e!=Error::Ok)return e;
+  e=read32(kBase+4,pc);if(e!=Error::Ok)return e;
+  if(sp<=0x20000000u||sp>0x20020000u||(sp&7)||!(pc&1)||
+      (pc&~1u)<kBase+8||(pc&~1u)>=kBase+1024*1024)return Error::Start;
+  e=read32(kDhcsr,startDhcsr);if(e!=Error::Ok)return e;
+  if(!(startDhcsr&(1u<<17)))return Error::Start;
+  e=coreRegister(15,startBeforePc,false);if(e!=Error::Ok)return e;
+  e=coreRegister(20,startBeforeSpecial,false);if(e!=Error::Ok)return e;
+  // The SRAM loader leaves PC in SRAM and PRIMASK=1. Merely unhalting it
+  // executes the loader's WFI loop, while S_HALT=0 falsely looks like RUN.
+  // Require an observed system reset and validate the reset-vector context.
+  startStep=2;pins_.reset(false);
+  e=write32(kDhcsr,0xa05f0003);if(e!=Error::Ok)return e; // Clear C_MASKINTS while halted.
+  e=write32(kDemcr,1);if(e!=Error::Ok)return e; // Catch reset before the first app instruction.
+  e=read32(kDhcsr,startDhcsr);if(e!=Error::Ok)return e; // Clear old sticky reset indication.
+  startStep=3;
+  e=write32(0xe000ed0c,0x05fa0004);if(e!=Error::Ok)return e; // One SYSRESETREQ; never replay.
+  const uint32_t began=now();
+  for(;;) {
+    e=read32(kDhcsr,startDhcsr);if(e!=Error::Ok)return e;
+    if(startDhcsr&(1u<<25))startResetSeen=true;
+    if(startDhcsr&(1u<<19))return Error::Start;
+    if(startResetSeen&&(startDhcsr&(1u<<17))&&!(startDhcsr&(1u<<25)))break;
+    if(uint32_t(now()-began)>=1000)return Error::Timeout;
+    wait(1);
+  }
+  startStep=4;
+  uint32_t xpsr=0;
+  e=coreRegister(15,startPc,false);if(e!=Error::Ok)return e;
+  e=coreRegister(13,startSp,false);if(e!=Error::Ok)return e;
+  e=coreRegister(20,startSpecial,false);if(e!=Error::Ok)return e;
+  e=coreRegister(16,xpsr,false);if(e!=Error::Ok)return e;
+  if((startPc&~1u)!=(pc&~1u)||startSp!=sp||(startSpecial&0x0701ff01u)||!(xpsr&(1u<<24)))return Error::Start;
+  startStep=5;
+  e=write32(kDhcsr,0xa05f0003);if(e!=Error::Ok)return e;
   e=write32(kDemcr,0);if(e!=Error::Ok)return e;
   e=write32(kDhcsr,0xa05f0001);if(e!=Error::Ok)return e;
-  pins_.reset(false);pins_.wait(10);
-  uint32_t state=0;e=read32(kDhcsr,state);if(e!=Error::Ok)return e;
-  return state&((1u<<17)|(1u<<19))?Error::Start:Error::Ok;
+  wait(10);e=read32(kDhcsr,startDhcsr);if(e!=Error::Ok)return e;
+  if(startDhcsr&((1u<<17)|(1u<<19)|(1u<<25)))return Error::Start;
+  startStep=6;return Error::Ok;
 }
 Error F407Swd::ready(uint32_t timeout) {
   const uint32_t started=target_.now();

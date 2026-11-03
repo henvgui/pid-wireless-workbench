@@ -1,5 +1,7 @@
 # Keil 直接无线下载使用说明
 
+从机 20261103.3 已修复“Download 成功后应用串口无响应、整机重启才恢复”的启动交接问题。Keil 命令不变，H2 会话在下载后自动恢复。[修复记录](UART_RESUME_FIX_20261103.md)。
+
 2026.11.03.2：更新主机与从机后，F407 SWD 自动使用 SRAM 1 KiB 块烧录器，Keil 的命令行及 Download 入口不变。烧录仍要求完整读回和启动确认；无线传输速度与目标 Flash 写入速度分别显示。算法与手动回退见 [SRAM 烧录器说明](../../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。
 
 更新：2026-10-19。当前工程：`C:/Users/twice/Desktop/STM32PRO/f407/MDK-ARM/f407.uvprojx`，Target 为 `f407`，芯片为 **STM32F407VET6，512 KiB**。

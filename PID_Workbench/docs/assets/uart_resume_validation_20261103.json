@@ -1,0 +1,110 @@
+{
+  "date": "2026-11-03",
+  "slave_version": "20261103.3",
+  "target": "STM32F407VET6",
+  "bytes": 10252,
+  "sha256": "ff0ab81d851a2d6e30faaa516c01cf2f7555bbaa80af0cc64599dc91c0380956",
+  "before_fix": {
+    "job": "d8cbd8c5be6e62385ff8c236",
+    "old_start_ack": true,
+    "readback_verified": true,
+    "uart_monitor_seconds": 6,
+    "uart_received_bytes": 0,
+    "uart_open": true,
+    "paused": false
+  },
+  "after_fix": [
+    {
+      "job": "365602b55b5d279fb326de89",
+      "seconds": 4.052741,
+      "verified": true,
+      "start_ack": true,
+      "same_h2_session": true,
+      "uart_bytes_over_3s": 7646,
+      "pause_events": 1,
+      "dropped": 0,
+      "uart_errors": 0,
+      "start_trace": {
+        "type": "starttrace",
+        "step": 6,
+        "reset_seen": true,
+        "before_pc": "0x20000012",
+        "before_special": "0x00000001",
+        "pc": "0x08000230",
+        "sp": "0x20000c18",
+        "special": "0x00000000",
+        "dhcsr": "0x01010001"
+      }
+    },
+    {
+      "job": "3e1f3a8b93e89aeab0701855",
+      "seconds": 4.061407,
+      "verified": true,
+      "start_ack": true,
+      "same_h2_session": true,
+      "uart_bytes_over_3s": 8190,
+      "pause_events": 2,
+      "dropped": 0,
+      "uart_errors": 0,
+      "start_trace": {
+        "type": "starttrace",
+        "step": 6,
+        "reset_seen": true,
+        "before_pc": "0x20000012",
+        "before_special": "0x00000001",
+        "pc": "0x08000230",
+        "sp": "0x20000c18",
+        "special": "0x00000000",
+        "dhcsr": "0x01010001"
+      }
+    },
+    {
+      "job": "fa31864810956379bc97a4f0",
+      "seconds": 4.051336,
+      "verified": true,
+      "start_ack": true,
+      "same_h2_session": true,
+      "uart_bytes_over_3s": 8565,
+      "pause_events": 3,
+      "dropped": 0,
+      "uart_errors": 0,
+      "start_trace": {
+        "type": "starttrace",
+        "step": 6,
+        "reset_seen": true,
+        "before_pc": "0x20000012",
+        "before_special": "0x00000001",
+        "pc": "0x08000230",
+        "sp": "0x20000c18",
+        "special": "0x00000000",
+        "dhcsr": "0x01010001"
+      }
+    }
+  ],
+  "tx_test": {
+    "command": "S",
+    "commands": 2,
+    "confirmed_uart_bytes": 2,
+    "before_actual": [
+      24,
+      24
+    ],
+    "after_actual": [
+      0,
+      0
+    ],
+    "still_receiving_bytes": 2720,
+    "note": "Target uses its existing S command. Motors were suspended in the air by the user; test ended with speed zero."
+  },
+  "software_tests": {
+    "native_groups": 17,
+    "python_tests": 117
+  },
+  "slave_firmware_sha256": "031aa4e7c4d26296b854d27cb43745c28c184fd696da6ccb4555cc3852180667",
+  "scope": [
+    "Target application bytes were unchanged.",
+    "Physical tests used F407VE SWD and H2 115200 8N1.",
+    "UART-ROM owner-destruction ordering fixed in source; that path has no new physical validation.",
+    "Old successful-start checks did not prove application context/interrupt restoration."
+  ]
+}

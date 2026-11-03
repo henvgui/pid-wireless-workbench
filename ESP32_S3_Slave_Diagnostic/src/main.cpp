@@ -23,7 +23,7 @@ const char* kFirmware="slave_flash_psram";
 #else
 const char* kFirmware="slave_flash";
 #endif
-const char* kVersion="20261103.2";
+const char* kVersion="20261103.3";
 const char* kRadio="espnow";
 #elif defined(PID_LINK_ENABLED)
 const char* kFirmware="slave_wireless";
@@ -198,6 +198,15 @@ void execute(Console& console) {
   }
   using diagnostic::Kind;
   switch (command.kind) {
+    case Kind::StartTrace:
+#if defined(PID_FLASH_ENABLED)
+      {uint32_t v[8]={};pidflash::swdStartDiagnostics(v,8);
+       console.reply("{\"type\":\"starttrace\",\"step\":%lu,\"reset_seen\":%s,\"before_pc\":\"0x%08lx\",\"before_special\":\"0x%08lx\",\"pc\":\"0x%08lx\",\"sp\":\"0x%08lx\",\"special\":\"0x%08lx\",\"dhcsr\":\"0x%08lx\"}",
+           (unsigned long)v[0],v[1]?"true":"false",(unsigned long)v[2],(unsigned long)v[3],(unsigned long)v[4],(unsigned long)v[5],(unsigned long)v[6],(unsigned long)v[7]);}
+#else
+      console.reply("{\"type\":\"error\",\"code\":\"programmer_not_built\"}");
+#endif
+      break;
     case Kind::RamCheck:
 #if defined(PID_FLASH_ENABLED)
       {

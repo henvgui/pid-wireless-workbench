@@ -16,6 +16,7 @@ int main() {
   assert(parse("link",command) && command.kind==Kind::Link);
   assert(parse("swdprobe",command) && command.kind==Kind::SwdProbe);
   assert(parse("ramcheck",command) && command.kind==Kind::RamCheck);
+  assert(parse("starttrace",command) && command.kind==Kind::StartTrace);
   assert(!parse("ramcheck erase",command));
   assert(parse("swdunprotect ERASE_ALL_F407VE",command) && command.kind==Kind::SwdUnprotect);
   for(const char* text:{"swdunprotect","swdunprotect ERASE","swdunprotect erase_all_f407ve","swdunprotect ERASE_ALL_F407VE extra"})assert(!parse(text,command));

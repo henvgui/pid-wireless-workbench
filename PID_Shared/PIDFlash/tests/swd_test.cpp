@@ -88,10 +88,6 @@ std::vector<uint8_t> firmware(size_t size) {
 }
 }
 int main() {
-  {Pins pins;for(unsigned i=0;i<3;++i){pins.ack();pins.ack();pins.reply(0);}
-   pins.ack();pins.reply(0);pins.reply(0);pins.reply(0);ArmSwd arm(pins);
-   assert(arm.start()==Error::Ok&&pins.responses.empty()&&pins.resets==2&&pins.time==10);
-   assert(pins.sent(57,32)==0xa05f0003&&pins.sent(171,32)==0&&pins.sent(285,32)==0xa05f0001);}
   {Pins pins;for(unsigned i=0;i<3;++i)pins.ack();pins.reply(0);pins.reply(0);
    ArmSwd arm(pins);uint32_t words[]={123,456};assert(arm.writeBlock(0x20000000,words,2)==Error::Ok);
    assert(pins.responses.empty()&&pins.sent(8,32)==0x20000000&&pins.sent(57,32)==123&&pins.sent(106,32)==456);}

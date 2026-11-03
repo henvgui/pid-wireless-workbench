@@ -1,5 +1,7 @@
 # ESP32-S3 从机启动与指令测试
 
+20261103.3：修复 F407 SWD 下载后应用串口不恢复、需整机重启的问题；RUN 阶段确认系统复位、Flash 入口及中断上下文，新增缓存诊断 `!starttrace`。另将 UART ROM 的临时串口对象析构移动到完成通知之前，避免另一核恢复 UART 后被再次关闭。[实板修复记录](../PID_Workbench/docs/UART_RESUME_FIX_20261103.md)。
+
 20261103.2：`slave_flash_psram` / `slave_flash` 增加 F407 SRAM 块烧录器和 `!ramcheck`（复位暂停目标，仅修改 SRAM）。正常烧录保持完整读回和启动确认，详见 [算法与回退说明](../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。
 
 ## 2026-10-23：USB 自动下载

@@ -60,6 +60,9 @@ class ArmSwd:public SwdTarget {
   void wait(uint32_t ms) override { pins_.wait(ms); }
   uint32_t debugPortId=0;
   uint8_t lastAck=0,lastRequest=0,connectStep=0;
+  uint8_t startStep=0;
+  bool startResetSeen=false;
+  uint32_t startBeforePc=0,startBeforeSpecial=0,startPc=0,startSp=0,startSpecial=0,startDhcsr=0;
  private:
   void bit(bool value);
   void bits(uint32_t value,unsigned count);

@@ -1,5 +1,7 @@
 # AI 接入与调用约定
 
+从机 20261103.3：F407 SWD 的 `start_ack` 增加系统复位、Flash 入口/SP 和中断上下文检查，修复下载后应用串口不恢复的问题；HTTP/CLI 请求不变。原始调试可在从机 USB 查询只读缓存 `!starttrace`，`step=6` 为本次启动检查完成，不代表任意目标应用的业务功能正常。[修复与收发验收](docs/UART_RESUME_FIX_20261103.md)。
+
 2026.11.03.2：F407 SWD 默认使用 `ram_1k` SRAM 烧录器，现有调用不变。`capabilities.swd_programmer` 描述能力；任务结果增加 `algorithm`、`target_program_seconds`，完整目标读回仍为必需。手动使用旧写入算法可加 CLI `--swd-legacy` 或 flash 请求 `"swd_legacy": true`（仅 SWD）。失败后不自动换算法或重擦除；先查原任务，明确重烧再用新幂等键。[算法、SRAM 布局与回退](../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。
 
 2026.11.03.1：固件传输自动协商 3072 B USB 批次、192 B 无线分包和 8 包窗口，既有 `flash` 请求不需新增参数；`capabilities.firmware_transfer` 描述能力，实际模式及速度记录在任务结果的 `transfer` 中。传输到 RAM 的成功不等于目标已烧录，仍须检查任务 `verified` 和所需的启动确认。旧固件回退逐包路径。[协议](../PID_Shared/PIDFlash/BULK_TRANSFER.md)、[实板记录](docs/BULK_VALIDATION_20261103.md)。

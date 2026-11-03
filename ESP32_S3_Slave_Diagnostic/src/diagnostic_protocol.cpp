@@ -31,7 +31,7 @@ bool parse(const char* text, Command& result) {
     {"ping",Kind::Ping},{"info",Kind::Info},{"status",Kind::Status},{"pins",Kind::Pins},
     {"rgb",Kind::Rgb},{"off",Kind::Off},{"auto",Kind::Auto},{"watch",Kind::Watch},{"help",Kind::Help},
     {"link",Kind::Link},{"radio",Kind::Radio},{"swd",Kind::Swd},{"swdcheck",Kind::SwdCheck},
-    {"swdhold",Kind::SwdHold},{"swdrelease",Kind::SwdRelease},{"swdprobe",Kind::SwdProbe},{"swdunprotect",Kind::SwdUnprotect},{"ramcheck",Kind::RamCheck}};
+    {"swdhold",Kind::SwdHold},{"swdrelease",Kind::SwdRelease},{"swdprobe",Kind::SwdProbe},{"swdunprotect",Kind::SwdUnprotect},{"ramcheck",Kind::RamCheck},{"starttrace",Kind::StartTrace}};
   for (const auto& entry:names) if (!std::strcmp(words[0],entry.name)) parsed.kind=entry.kind;
   if (parsed.kind==Kind::Invalid) return false;
   if (parsed.kind==Kind::Rgb) {

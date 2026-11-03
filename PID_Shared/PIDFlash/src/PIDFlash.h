@@ -22,6 +22,8 @@ struct SwdDiagnostics {
   uint8_t recoveryState; // 0 none, 1 running, 2 complete, 3 failed.
 };
 SwdDiagnostics swdDiagnostics();
+// Last start's reset/cpu context, cached by worker; does not access the target.
+bool swdStartDiagnostics(uint32_t* values,size_t count);
 // Fixed read-only F407 diagnosis. Pulses reset and halts the core; no Flash/RAM writes.
 // Leaves the target halted so an unverified application is never started.
 Error probeSwdTarget(uint32_t* values,size_t count);

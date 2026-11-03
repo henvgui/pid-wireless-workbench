@@ -1,5 +1,7 @@
 # STM32 无线 UART / SWD 烧录（F103 / G431 / F407）
 
+从机 20261103.3：加强 F407 RUN 的真实复位和启动上下文确认，修复下载后 H2 串口失效；旧 `start_ack` 不足以确认用户程序正常恢复。[修复记录及连续下载/真实指令验收](../../PID_Workbench/docs/UART_RESUME_FIX_20261103.md)。
+
 2026-11-03：F407 新增 [SRAM 1 KiB 块烧录器](RAM_PROGRAMMER.md)，减少逐字 SWD 往返；保持完整目标读回校验和原 SWD 时钟，保留手动旧算法入口。无线批量传输和目标 Flash 写入分别计时。
 
 2026-10-22 SWD 提速：从机完整固件的 `PID_FLASH_SWD_HALF_PERIOD_US` 设为 2，旧值为 5。当前 F407VET6 同一份 8,708 字节镜像实测由 20.08 秒缩短为 12.60 秒，完整读回、设备和容量检查全部保留，任务 `6fc4bd9178dc915eabd15be0` 的 verified/start_ack 均为 true。需更新从机 `slave_flash_psram`，主机和 Keil 配置无需修改。长线不稳定时可将编译参数恢复为 5；失败不自动重放擦写。完整记录见 `../../PID_Workbench/validation/speed_benchmark_20261022/`。

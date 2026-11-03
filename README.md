@@ -25,6 +25,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 | 已验证范围、已修问题与限制 | [检查记录](PID_Workbench/docs/PROJECT_AUDIT_20261024.md) |
 | 批量传输速度、丢包及恢复测试 | [2026-11-03 实板记录](PID_Workbench/docs/BULK_VALIDATION_20261103.md) |
 | F407 SRAM 块烧录与 Keil 提速 | [算法说明](PID_Shared/PIDFlash/RAM_PROGRAMMER.md)、[实板对比](PID_Workbench/docs/RAM_VALIDATION_20261103.md) |
+| 下载后串口失效及启动确认修复 | [2026-11-03 修复记录](PID_Workbench/docs/UART_RESUME_FIX_20261103.md) |
 | 首次构建、更换电脑与源码管理 | [开发与配置说明](docs/DEVELOPMENT.md) |
 | 桌面历史备份的源码归档 | [历史版本索引](archives/desktop-snapshots/README.md) |
 
