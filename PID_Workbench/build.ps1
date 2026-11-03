@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $sourceProtocol = Join-Path $PSScriptRoot '../PID_Shared/PIDFlash/tools'
 $bundledProtocol = Join-Path $PSScriptRoot 'backend/protocol'
 New-Item -ItemType Directory -Path $bundledProtocol -Force | Out-Null
-foreach ($protocolFile in @('flash_stm32.py','echo_stm32.py')) {
+foreach ($protocolFile in @('flash_stm32.py','echo_stm32.py','bulk_stm32.py')) {
     Copy-Item -LiteralPath (Join-Path $sourceProtocol $protocolFile) -Destination (Join-Path $bundledProtocol $protocolFile) -Force
 }
 $compilerPath = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'

@@ -23,7 +23,7 @@ const char* kFirmware="slave_flash_psram";
 #else
 const char* kFirmware="slave_flash";
 #endif
-const char* kVersion="20261024.3";
+const char* kVersion="20261103.1";
 const char* kRadio="espnow";
 #elif defined(PID_LINK_ENABLED)
 const char* kFirmware="slave_wireless";

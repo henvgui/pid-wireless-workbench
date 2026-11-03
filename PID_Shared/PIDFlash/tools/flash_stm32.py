@@ -60,6 +60,22 @@ class Link:
 
     def query(self, command, kind, accept=lambda x: True, timeout=6):
         self.serial.write((command + "\n").encode("ascii"))
+        try:
+            return self.receive(kind, accept, timeout)
+        except TimeoutError:
+            if command != "!get":
+                raise
+            # A killed PC process may leave a partial binary input frame.
+            # Fixed recovery contains no text command marker, so old hosts
+            # simply echo it; two newlines terminate that harmless echo.
+            from bulk_stm32 import encode_frame
+            recovery=b"\0"+encode_frame(2,0)+b"\n\n"
+            assert b"!" not in recovery and b"?" not in recovery
+            self.serial.write(recovery)
+            self.serial.write(b"!get\n")
+            return self.receive(kind, accept, timeout)
+
+    def receive(self, kind, accept=lambda x: True, timeout=6):
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             if b"\n" not in self.buffer:
@@ -78,7 +94,7 @@ class Link:
                 raise RuntimeError(value)
             if value.get("type") == kind and accept(value):
                 return value
-        raise TimeoutError(command[:70])
+        raise TimeoutError("Waiting for "+kind)
 
     def fw(self, command, transfer, op, offset=0):
         for attempt in range(4):
@@ -125,9 +141,13 @@ def main():
     parser.add_argument("--resume", type=Path, help="Reuse transfer ID and verify identical manifest; RAM staging survives only while slave stays powered")
     parser.add_argument("--journal", type=Path, default=Path("stm32_transfer.json"))
     parser.add_argument("--timeout", type=float, help="Programming timeout; defaults to 180s for F103/G431, 1800s for F407")
+    parser.add_argument("--legacy", action="store_true", help="Use the prior per-packet transfer for comparison")
+    parser.add_argument("--bulk-drop-every", type=int, default=0, help="Staging-only test: deliberately drop every Nth radio data/ACK; 0 disables")
     args = parser.parse_args()
     if args.run and not args.execute:
         parser.error("--run requires --execute")
+    if not 0<=args.bulk_drop_every<=255 or args.bulk_drop_every and (args.execute or args.legacy):
+        parser.error("--bulk-drop-every must be 0..255 and is staging-only, without --execute/--legacy")
     image = args.binary.read_bytes()
     target = target_profile(args.part)
     if args.interface == "swd" and target["id"] not in (3, 4):
@@ -183,6 +203,23 @@ def main():
         offset = status["received"]
         if not 0 <= offset <= len(image):
             raise RuntimeError("Invalid receiver offset")
+        if args.bulk_drop_every and (status.get("bulk_window")!=8 or offset%192):
+            raise RuntimeError("Receiver does not support bulk loss-injection tests")
+        legacy_started=time.monotonic()
+        transfer_start=offset
+        if status.get("bulk_window") == 8 and not args.legacy and offset < len(image) and offset%192==0:
+            from bulk_stm32 import transfer_image
+            def bulk_progress(received, retries):
+                print(f"Received {received}/{len(image)}; retries={retries}", flush=True)
+                record.update(received=received, bulk_retries=retries)
+                save()
+            record["transfer"] = transfer_image(link, transfer, image, offset, bulk_progress, args.bulk_drop_every)
+            record["transfer"]["kib_per_second"] = record["transfer"]["bytes"]/1024/max(.001,record["transfer"]["seconds"])
+            link.retries+=record["transfer"]["radio_retries"]
+            print("Bulk result "+json.dumps(record["transfer"]), flush=True)
+            status=link.fw(f"!fw status {tid}",transfer,5)
+            offset=status["received"]
+            if offset!=len(image):raise RuntimeError("Bulk receiver length mismatch")
         while offset < len(image):
             block = image[offset:offset+chunk]
             status = link.fw(f"!fw data {tid} {offset} {block.hex()}", transfer, 2, offset)
@@ -194,6 +231,10 @@ def main():
                 record.update(received=offset, retries=link.retries)
                 save()
                 last_report=time.monotonic()
+        if "transfer" not in record:
+            seconds=time.monotonic()-legacy_started
+            record["transfer"]={"mode":"legacy_stop_wait","bytes":len(image)-transfer_start,"seconds":seconds,
+                                "kib_per_second":(len(image)-transfer_start)/1024/max(.001,seconds)}
         if status["state"] not in ("done", "programming"):
             status = link.fw(f"!fw seal {tid}", transfer, 3)
         record["staged"] = True

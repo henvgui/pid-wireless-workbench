@@ -8,6 +8,7 @@
 #include "serial_log.h"
 #include "serial_bridge.h"
 #include "serial_tx.h"
+#include "bulk_core.h"
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <atomic>
@@ -34,6 +35,16 @@ bool pending=false,replyReady=false,locked=false;
 uint32_t nextSequence=0,lastSend=0,retries=0,replyRetries=0;
 uint8_t attempts=0;
 Packet hostReply;
+bulk::Sender bulkSender;
+bulk::UsbDecoder bulkDecoder;
+bulk::UsbFrame bulkUsbFrame;
+bool bulkHostActive=false,bulkNotice=false,bulkSlaveActive=false,bulkAckPending=false;
+bool bulkUsbQuarantine=false;
+uint32_t bulkHostToken=0,bulkHostSession=0,bulkPeerSession=0,bulkLastReport=0;
+uint32_t bulkSlaveToken=0,bulkSlaveOwner=0,bulkSlaveBitmap=0,bulkLastAck=0,bulkPackets=0;
+Error bulkSlaveError=Error::Ok;
+uint32_t bulkDataAttempts=0,bulkDataDrops=0,bulkAckAttempts=0,bulkAckDrops=0,bulkAckDropsSeen=0;
+uint8_t bulkDropEvery=0,bulkSlaveDropEvery=0;
 Target hostTarget=Target::G431;
 Interface hostInterface=Interface::Uart;
 uint8_t* image=nullptr;
@@ -179,7 +190,7 @@ void makeReply(const Packet& request,Error error,Packet& response) {
   response.sender=e.session();response.peer=request.sender;response.transfer=request.transfer;
   response.sequence=request.sequence;response.offset=staging.received;response.length=32;
   response.data[0]=uint8_t(staging.state);response.data[1]=uint8_t(error);
-  response.data[2]=progressStage.load();response.data[3]=(PID_FLASH_TARGET_ENABLE?1:0)|(goAcknowledged.load()?2:0)|4|(serialbridge::waitingTx()?8:0);
+  response.data[2]=progressStage.load();response.data[3]=(PID_FLASH_TARGET_ENABLE?1:0)|(goAcknowledged.load()?2:0)|4|(serialbridge::waitingTx()?8:0)|16;
   put32(response.data+4,staging.size);put32(response.data+8,progressBytes.load());
   put32(response.data+12,workerDevice.load());put32(response.data+16,uint32_t(lastJobError));
   put32(response.data+20,uint32_t(staging.target));
@@ -192,7 +203,15 @@ bool send(const Packet& p) {
   static uint32_t sends=0;
   if(++sends%PID_FLASH_TEST_DROP_EVERY==0)return true;
 #endif
-  uint8_t bytes[kMaxPacket];const size_t n=encode(p,bytes);return n&&pidlink::radio.sendAux(bytes,n);
+  uint8_t bytes[kMaxPacket];const size_t n=encode(p,bytes);return n&&pidlink::radio.sendAux(bytes,n,p.op!=Op::BulkData);
+}
+bool sendBulkAck() {
+  if(bulkSlaveDropEvery&&(bulkAckAttempts+1)%bulkSlaveDropEvery==0){++bulkAckAttempts;++bulkAckDrops;return true;}
+  Packet p;p.op=Op::BulkAck;p.sender=pidlink::radio.engine().session();p.peer=bulkSlaveOwner;
+  p.transfer=staging.transfer;p.sequence=bulkSlaveToken;p.offset=staging.received;p.length=12;
+  p.data[0]=uint8_t(bulkSlaveError);p.data[1]=1;p.data[2]=bulk::kWindow;put32(p.data+4,bulkSlaveBitmap);
+  put32(p.data+8,bulkAckDrops);
+  if(!send(p))return false;++bulkAckAttempts;return true;
 }
 bool sameRequest(const Packet& a,const Packet& b) {
   return a.op==b.op&&a.sender==b.sender&&a.peer==b.peer&&a.transfer==b.transfer&&
@@ -382,6 +401,14 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
   Packet p;if(!decode(bytes,n,p)||p.op==Op::Reply||p.op==Op::EchoReply||p.op==Op::UartReply||p.op==Op::MotorReply||p.op==Op::LogReply||p.op==Op::SerialReply)return false;
   const auto& r=pidlink::radio;const auto& e=r.engine();
   if(p.sender!=e.peerSession()||p.peer!=e.session()||!e.online(now))return false;
+  if(p.op==Op::BulkAck)return false;
+  if(p.op==Op::BulkData) {
+    if(!bulkSlaveActive||p.sender!=bulkSlaveOwner||p.sequence!=bulkSlaveToken||p.transfer!=staging.transfer)return false;
+    if(bulkSlaveError==Error::Ok)bulkSlaveError=staging.appendWindow(p.transfer,p.offset,p.data,p.length,bulkSlaveBitmap);
+    bulkAckPending=true;++bulkPackets;
+    if(bulkSlaveError!=Error::Ok||bulkPackets>=4||staging.received==staging.size)bulkLastAck=now-8;
+    return true;
+  }
   if(logOp(p.op))return receiveSerialLog(p);
   if(serialOp(p.op)) {
     if(!PID_FLASH_TARGET_ENABLE){Packet reply;makeReply(p,Error::Disabled,reply);send(reply);return true;}
@@ -434,12 +461,18 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
           image=replacement;imageCapacity=requestedSize;staging.storage(image,imageCapacity);
         }
         error=staging.begin(p.transfer,requestedSize,kb,p.data+8,selected,interface);
-        if(error==Error::Ok)serialbridge::poll(now,true);
+        if(error==Error::Ok){bulkSlaveActive=bulkAckPending=false;bulkSlaveBitmap=0;serialbridge::poll(now,true);}
         if(error==Error::Ok&&prior!=p.transfer){lastJobError=Error::Ok;workerDevice=0;workerFlashKb=0;goAcknowledged.store(false);progress(0,0);}
       }
       break;
-    case Op::Data:error=staging.append(p.transfer,p.offset,p.data,p.length);break;
-    case Op::Seal:if(!p.length)error=staging.seal(p.transfer,sha256);break;
+    case Op::BulkOpen:
+      if(p.transfer!=staging.transfer){error=Error::WrongTransfer;break;}
+      if(staging.state!=State::Receiving||(p.length!=1&&p.length!=2)||p.data[0]!=bulk::kWindow||p.offset!=staging.received||p.offset%kChunk){error=Error::Invalid;break;}
+      bulkSlaveActive=true;bulkAckPending=false;bulkSlaveOwner=p.sender;bulkSlaveToken=p.sequence;
+      bulkSlaveBitmap=bulkPackets=0;bulkLastAck=now;bulkSlaveError=Error::Ok;
+      bulkSlaveDropEvery=p.length==2?p.data[1]:0;bulkAckAttempts=bulkAckDrops=0;error=Error::Ok;break;
+    case Op::Data:bulkSlaveActive=false;error=staging.append(p.transfer,p.offset,p.data,p.length);break;
+    case Op::Seal:if(!p.length){error=staging.seal(p.transfer,sha256);if(error==Error::Ok)bulkSlaveActive=bulkAckPending=false;}break;
     case Op::Flash:
       if(echoActive||uartActive){error=Error::Busy;break;}
       if(p.transfer!=staging.transfer){error=Error::WrongTransfer;break;}
@@ -457,13 +490,20 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
     case Op::Query:
       if(!p.length)error=p.transfer==staging.transfer?Error::Ok:Error::WrongTransfer;
       break;
-    case Op::Abort:if(!p.length)error=staging.abort(p.transfer);break;
+    case Op::Abort:if(!p.length){error=staging.abort(p.transfer);if(error==Error::Ok)bulkSlaveActive=bulkAckPending=false;}break;
     default:break;
   }
   cachedSequence=p.sequence;lastRequest=p;makeReply(p,error,lastReply);send(lastReply);return true;
 }
-bool hostReceive(const uint8_t* bytes,size_t n,uint32_t) {
-  Packet p;if(!decode(bytes,n,p)||!pending)return false;
+bool hostReceive(const uint8_t* bytes,size_t n,uint32_t now) {
+  Packet p;if(!decode(bytes,n,p))return false;
+  if(p.op==Op::BulkAck) {
+    if(!bulkHostActive||p.sender!=bulkPeerSession||p.peer!=bulkHostSession||p.transfer!=bulkSender.transfer||p.sequence!=bulkHostToken||(p.length!=8&&p.length!=12)||p.data[1]!=1||p.data[2]!=bulk::kWindow||p.data[3]||p.data[0]>uint8_t(Error::Start))return false;
+    if(p.length==12)bulkAckDropsSeen=get32(p.data+8);
+    if(bulkSender.error==Error::Ok)bulkSender.error=p.data[0]?Error(p.data[0]):bulkSender.acknowledge(p.offset,get32(p.data+4),now);
+    bulkNotice=true;return true;
+  }
+  if(!pending)return false;
   if(p.sender!=outgoing.peer||p.peer!=outgoing.sender||p.transfer!=outgoing.transfer||p.sequence!=outgoing.sequence)return false;
   if(serialOp(outgoing.op)) {
     if(p.op==Op::SerialReply){if(p.length<32||p.length>128||p.data[0]!=uint8_t(outgoing.op)||p.data[5]!=1||p.data[7]>uint8_t(Error::Start))return false;}
@@ -501,6 +541,12 @@ bool hostReceive(const uint8_t* bytes,size_t n,uint32_t) {
   if(p.length==24){put32(p.data+24,0);p.length=28;}
   if(p.length==28){put32(p.data+28,uint32_t(Interface::Uart));p.length=32;}
   if(!interfaceValid(Target(get32(p.data+20)),Interface(get32(p.data+28))))return false;
+  if(outgoing.op==Op::BulkOpen&&p.data[1]==0) {
+    if(!(p.data[3]&16)||p.offset!=outgoing.offset)return false;
+    bulkSender.begin(p.transfer,get32(p.data+4),p.offset);bulkHostActive=true;bulkNotice=false;
+    bulkHostToken=outgoing.sequence;bulkHostSession=outgoing.sender;bulkPeerSession=outgoing.peer;bulkLastReport=now;
+    bulkDropEvery=outgoing.length==2?outgoing.data[1]:0;bulkDataAttempts=bulkDataDrops=bulkAckDropsSeen=0;
+  }
   hostReply=p;replyRetries=attempts?attempts-1:0;pending=false;replyReady=true;
   if((outgoing.op==Op::Abort&&p.data[1]==0&&State(p.data[0])==State::Idle)||
       State(p.data[0])==State::Done||State(p.data[0])==State::Failed)locked=false;
@@ -518,12 +564,17 @@ bool unhex(const char* text,uint8_t* bytes,size_t n) {
   return true;
 }
 } // namespace
-void beginHost(){pidlink::radio.setAuxReceiver(hostReceive);}
+void onAuxTransmitted(const uint8_t* bytes,size_t n,uint32_t now) {
+  if(!bulkHostActive||n<32||bytes[3]!=uint8_t(Op::BulkData)||get32(bytes+4)!=bulkHostSession||get32(bytes+8)!=bulkPeerSession||get32(bytes+12)!=bulkSender.transfer||get32(bytes+16)!=bulkHostToken)return;
+  bulkSender.transmitted(get32(bytes+20),now);
+}
+void beginHost(){pidlink::radio.setAuxReceiver(hostReceive);pidlink::radio.setAuxTransmitted(onAuxTransmitted);}
 void beginSlave(){
   pidlink::radio.setAuxReceiver(slaveReceive);
   if(PID_FLASH_TARGET_ENABLE)xTaskCreatePinnedToCore(programWorker,"stm32_rom",4096,nullptr,1,&worker,0);
 }
 void pollSlave(uint32_t now) {
+  if(bulkSlaveActive&&bulkAckPending&&uint32_t(now-bulkLastAck)>=8&&sendBulkAck()){bulkAckPending=false;bulkPackets=0;bulkLastAck=now;}
   pollSerialLog();
   if(swdHoldUntil&&int32_t(now-swdHoldUntil)>=0)releaseSwdInput();
   if(workerDone.exchange(false)) {
@@ -536,15 +587,43 @@ void pollSlave(uint32_t now) {
       staging.state!=State::Receiving&&staging.state!=State::Ready&&!staging.busy()&&PID_FLASH_TARGET_ENABLE);
 }
 void pollHost(uint32_t now) {
+  if(bulkHostActive&&bulkSender.error==Error::Ok) {
+    const auto& e=pidlink::radio.engine();
+    if(!pidlink::radio.ready()||e.session()!=bulkHostSession||e.peerSession()!=bulkPeerSession)bulkSender.error=Error::Link;
+    else for(unsigned i=0;i<bulk::kWindow;++i) {
+      auto* chunk=bulkSender.next(now);if(!chunk)break;
+      Packet p;p.op=Op::BulkData;p.sender=bulkHostSession;p.peer=bulkPeerSession;p.transfer=bulkSender.transfer;p.sequence=bulkHostToken;
+      p.offset=chunk->offset;p.length=chunk->length;std::memcpy(p.data,chunk->data,p.length);
+      const bool drop=bulkDropEvery&&(bulkDataAttempts+1)%bulkDropEvery==0;
+      if(!drop&&!send(p))break;
+      ++bulkDataAttempts;
+      if(drop){++bulkDataDrops;bulkSender.sent(*chunk,now);}else bulkSender.scheduled(*chunk);
+    }
+    if(bulkSender.error!=Error::Ok)bulkNotice=true;
+  }
   if(!pending)return;
   const auto& r=pidlink::radio;const auto& e=r.engine();
   if(!r.ready()||outgoing.sender!=e.session()||outgoing.peer!=e.peerSession()) {localError(Error::Link,outgoing.transfer);return;}
   if(attempts&&uint32_t(now-lastSend)<150)return;
   if(attempts==20){localError(Error::Timeout,outgoing.transfer);return;}
-  send(outgoing);if(attempts)++retries;++attempts;lastSend=now;
+  if(send(outgoing)){if(attempts)++retries;++attempts;lastSend=now;}
 }
 bool hostPending(){return pending||replyReady;}
 bool hostLocked(){return locked||echoLocked||uartLocked;}
+bool hostBulkActive(){return bulkHostActive;}
+bool hostBinaryReading(){return bulkDecoder.collecting()||bulkUsbQuarantine;}
+bool hostBinaryByte(uint8_t value,uint32_t) {
+  bool ready=false,invalid=false;
+  const bool consumed=bulkDecoder.feed(value,bulkUsbFrame,ready,invalid);
+  if(!consumed)return bulkHostActive||bulkUsbQuarantine;
+  if(invalid){bulkUsbQuarantine=true;if(bulkHostActive)bulkSender.error=Error::Invalid;bulkNotice=true;}
+  if(!ready)return consumed;
+  const auto& f=bulkUsbFrame;
+  if(f.kind==bulk::UsbKind::Exit&&(f.transfer==0||f.transfer==bulkSender.transfer)){bulkUsbQuarantine=false;bulkHostActive=false;bulkNotice=true;return true;}
+  if(!bulkHostActive||f.transfer!=bulkSender.transfer){bulkNotice=true;return true;}
+  if(f.kind==bulk::UsbKind::Data){const Error e=bulkSender.enqueue(f.offset,f.data,f.length);if(e!=Error::Ok)bulkSender.error=e;}
+  bulkNotice=true;return true;
+}
 bool targetActive(){return targetEnabled.load()||echoActive||uartActive||motorbridge::owned();}
 bool serialLogging(){return logActive;}
 Error recoverSwdTarget() {
@@ -698,6 +777,9 @@ bool hostCommand(const char* text) {
         if(count==8)put32(p.data+44,uint32_t(interface));
         hostTarget=selected;hostInterface=interface;valid=true;
       }
+    } else if(!std::strcmp(w[1],"bulk")&&(count==4||count==5)&&numeric(w[3],p.offset)) {
+      uint32_t drop=0;
+      if(count==4||(numeric(w[4],drop)&&drop<=255)){p.op=Op::BulkOpen;p.length=2;p.data[0]=bulk::kWindow;p.data[1]=drop;valid=true;}
     } else if(!std::strcmp(w[1],"data")&&count==5) {
       size_t size=std::strlen(w[4])/2;
       if(size&&size<=kChunk&&numeric(w[3],p.offset)&&unhex(w[4],p.data,size)){p.op=Op::Data;p.length=size;valid=true;}
@@ -710,6 +792,8 @@ bool hostCommand(const char* text) {
     }
   }
   if(!valid){localError(Error::Invalid,p.transfer);return true;}
+  if(bulkHostActive&&(p.op==Op::Seal||p.op==Op::Flash||p.op==Op::Data)){localError(Error::Busy,p.transfer);return true;}
+  if(p.op==Op::Begin||p.op==Op::Abort||p.op==Op::BulkOpen){bulkHostActive=false;bulkNotice=false;}
   outgoing=p;
   if(motor&&locked){localError(Error::Busy,p.transfer);return true;}
   if((uart&&(locked||echoLocked||uartLocked))||(!uart&&uartLocked)) {localError(Error::Busy,p.transfer);return true;}
@@ -725,7 +809,16 @@ bool hostCommand(const char* text) {
   return true;
 }
 bool takeHostReply(char* out,size_t size) {
-  if(!replyReady)return false;replyReady=false;
+  if(!replyReady) {
+    const uint32_t now=millis();
+    if(!bulkNotice||(bulkHostActive&&bulkSender.error==Error::Ok&&bulkSender.received!=bulkSender.size&&uint32_t(now-bulkLastReport)<20))return false;
+    bulkNotice=false;bulkLastReport=now;
+    snprintf(out,size,"{\"type\":\"bulk\",\"id\":%lu,\"received\":%lu,\"queued\":%lu,\"credit\":%lu,\"retries\":%lu,\"rto_ms\":%lu,\"active\":%s,\"error\":\"%s\",\"injected_data_drops\":%lu,\"injected_ack_drops\":%lu}",
+      (unsigned long)bulkSender.transfer,(unsigned long)bulkSender.received,(unsigned long)bulkSender.queued,(unsigned long)bulkSender.freeBytes(),
+      (unsigned long)bulkSender.retries,(unsigned long)bulkSender.rto,bulkHostActive?"true":"false",errorName(bulkSender.error),
+      (unsigned long)bulkDataDrops,(unsigned long)bulkAckDropsSeen);return true;
+  }
+  replyReady=false;
   const Packet& p=hostReply;
   if(serialOp(outgoing.op)) {
     const bool valid=p.op==Op::SerialReply&&p.length>=32;
@@ -783,7 +876,7 @@ bool takeHostReply(char* out,size_t size) {
   const bool swd=Interface(get32(p.data+28))==Interface::Swd;
   snprintf(out,size,"{\"type\":\"fw\",\"id\":%lu,\"request\":%lu,\"op\":%u,\"offset\":%lu,\"ok\":%s,\"error\":\"%s\",\"state\":\"%s\","
       "\"received\":%lu,\"size\":%lu,\"stage\":%u,\"progress\":%lu,\"device_id\":%lu,\"actual_flash_kb\":%lu,\"job_error\":\"%s\","
-      "\"target_enabled\":%s,\"go_ack\":%s,\"target\":\"%s\",\"profile\":%lu,\"interface\":\"%s\",\"start_ack\":%s,\"retries\":%lu,\"total_retries\":%lu,\"max_chunk\":%u,\"serial_waiting\":%s}",
+      "\"target_enabled\":%s,\"go_ack\":%s,\"target\":\"%s\",\"profile\":%lu,\"interface\":\"%s\",\"start_ack\":%s,\"retries\":%lu,\"total_retries\":%lu,\"max_chunk\":%u,\"serial_waiting\":%s,\"bulk_window\":%u}",
       static_cast<unsigned long>(p.transfer),static_cast<unsigned long>(p.sequence),unsigned(outgoing.op),
       static_cast<unsigned long>(outgoing.offset),p.data[1]==0?"true":"false",
       errorName(Error(p.data[1])),stateName(State(p.data[0])),static_cast<unsigned long>(p.offset),
@@ -792,7 +885,7 @@ bool takeHostReply(char* out,size_t size) {
       !swd&&(p.data[3]&2)?"true":"false",
       target?target->name:"unknown",static_cast<unsigned long>(get32(p.data+20)),
       swd?"swd":"uart",(p.data[3]&2)?"true":"false",
-      static_cast<unsigned long>(replyRetries),static_cast<unsigned long>(retries),unsigned((p.data[3]&4)?kChunk:kLegacyChunk),(p.data[3]&8)?"true":"false");
+      static_cast<unsigned long>(replyRetries),static_cast<unsigned long>(retries),unsigned((p.data[3]&4)?kChunk:kLegacyChunk),(p.data[3]&8)?"true":"false",unsigned((p.data[3]&16)?bulk::kWindow:0));
   return true;
 }
 } // namespace pidflash

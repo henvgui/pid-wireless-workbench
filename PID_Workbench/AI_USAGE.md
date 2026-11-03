@@ -1,5 +1,7 @@
 # AI 接入与调用约定
 
+2026.11.03.1：固件传输自动协商 3072 B USB 批次、192 B 无线分包和 8 包窗口，既有 `flash` 请求不需新增参数；`capabilities.firmware_transfer` 描述能力，实际模式及速度记录在任务结果的 `transfer` 中。传输到 RAM 的成功不等于目标已烧录，仍须检查任务 `verified` 和所需的启动确认。旧固件回退逐包路径。[协议](../PID_Shared/PIDFlash/BULK_TRANSFER.md)、[实板记录](docs/BULK_VALIDATION_20261103.md)。
+
 2026.10.24.2 新增 H2 双向无线串口：`serial configure --channel h2`，`serial send --text/--hex --idempotency-key ...`；HTTP 增加 `POST /v1/serial/send`。完整请求、去重与恢复边界见 [无线串口及 AI 调用](docs/WIRELESS_SERIAL.md)。旧调用未指定 channel 时仍为 H1。
 
 2026-10-23 新增从机 H1 独立串口日志接口：`pidctl.cmd serial configure/read/close/status`，HTTP 为 `/v1/serial/configure`、`/v1/serial/read`、`/v1/serial/close`、`/v1/serial/status`。固定游标重读及 HTTP 批次缓存避免丢失回复时消耗日志，`gap/dropped/rx_errors` 明确报告溢出；与烧录共享硬件锁。GUI 支持短暂断线自动重试及会话丢失后重建；CLI 调用者需自行执行恢复策略并尊重主动关闭和其他客户端。详见 [串口日志与 AI 接口](docs/SERIAL_LOG.md)。

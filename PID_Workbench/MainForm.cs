@@ -173,7 +173,7 @@ namespace PidWorkbench
             var sidebar=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(0,20,18,0)};root.Controls.Add(sidebar,0,1);
             string[] keys={"flash","pid","serial","echo","ai"},labels={"01   固件烧录","02   PID 参数","03   无线串口","04   文本回传","05   AI 接口"};
             for(int i=0;i<keys.Length;++i){string key=keys[i];var button=Button(labels[i],delegate{ShowPage(key);return Task.FromResult(0);});button.Width=145;button.Height=43;button.AutoSize=false;button.TextAlign=ContentAlignment.MiddleLeft;navigation[key]=button;sidebar.Controls.Add(button);}
-            sidebar.Controls.Add(Label("LOCAL / v2026.10\nESP-NOW 硬件工作台",Muted,70));
+            sidebar.Controls.Add(Label("LOCAL / v2026.11\nESP-NOW 硬件工作台",Muted,70));
             content.Dock=DockStyle.Fill;root.Controls.Add(content,1,1);
             statusLabel.Dock=DockStyle.Fill;statusLabel.ForeColor=Muted;statusLabel.Text="服务仅监听本机 127.0.0.1";root.Controls.Add(statusLabel,1,2);
             BuildFlash();BuildPid();BuildEcho();BuildAi();
@@ -382,6 +382,14 @@ namespace PidWorkbench
             jobTitle.Text=Json.Text(spec,"action").ToUpperInvariant()+"  "+Json.Text(job,"id");
             var phases=new Dictionary<string,string>{{"queued","排队"},{"validate","检查镜像"},{"probe","探测芯片"},{"transfer","无线传输"},{"erase","擦除"},{"write","写入"},{"verify","完整读回"},{"start","请求启动"},{"echo","文本回传"},{"done","完成"},{"failed","失败"}};
             string phase=Json.Text(job,"phase"),label;phases.TryGetValue(phase,out label);phaseLabel.Text=(label??phase)+" · "+state;
+            long done,total,first;DateTimeOffset began;
+            if(state=="running"&&Int64.TryParse(Json.Text(job,"work_done"),out done)&&Int64.TryParse(Json.Text(job,"work_total"),out total)&&total>0&&done>=0&&done<=total) {
+                phaseLabel.Text+=" · "+(done/1024.0).ToString("F1")+"/"+(total/1024.0).ToString("F1")+" KiB";
+                if(Int64.TryParse(Json.Text(job,"phase_first_done"),out first)&&first<=done&&DateTimeOffset.TryParse(Json.Text(job,"phase_started_at"),out began)) {
+                    double seconds=(DateTimeOffset.UtcNow-began).TotalSeconds;
+                    if(seconds>=.1)phaseLabel.Text+=" · "+((done-first)/1024.0/seconds).ToString("F1")+" KiB/s";
+                }
+            }
             phaseLabel.ForeColor=state=="failed"||state=="interrupted"?Color.Salmon:Accent;
             double value;Double.TryParse(Json.Text(job,"progress"),System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out value);progress.Value=Math.Max(0,Math.Min(1000,(int)(value*1000)));
             string log=Json.Text(job,"log");if(logs.Text!=log){logs.Text=log;logs.SelectionStart=logs.TextLength;logs.ScrollToCaret();}

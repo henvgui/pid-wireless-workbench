@@ -43,7 +43,7 @@ size_t encode(const Packet& p,uint8_t* out) {
   return 32+p.length;
 }
 bool decode(const uint8_t* in,size_t n,Packet& out) {
-  if(!in||n<32||n>kMaxPacket||in[0]!='P'||in[1]!='F'||in[2]!=1||in[3]<1||in[3]>uint8_t(Op::SerialReply)||in[26]||in[27])return false;
+  if(!in||n<32||n>kMaxPacket||in[0]!='P'||in[1]!='F'||in[2]!=1||in[3]<1||in[3]>uint8_t(Op::BulkAck)||in[26]||in[27])return false;
   const uint16_t size=uint16_t(in[24])|(uint16_t(in[25])<<8);
   if(size>kChunk||n!=32u+size||get32(in+28+size)!=crc32(in,28+size))return false;
   Packet p;p.op=Op(in[3]);p.sender=get32(in+4);p.peer=get32(in+8);p.transfer=get32(in+12);
@@ -79,6 +79,18 @@ Error Staging::append(uint32_t id,uint32_t offset,const uint8_t* data,size_t n) 
   if(offset!=received)return Error::Offset;
   if(state!=State::Receiving)return Error::Invalid;
   std::memcpy(bytes_+received,data,n);received+=n;return Error::Ok;
+}
+Error Staging::appendWindow(uint32_t id,uint32_t offset,const uint8_t* data,size_t n,uint32_t& bitmap) {
+  if(id!=transfer)return Error::WrongTransfer;
+  if(state!=State::Receiving)return busy()?Error::Busy:Error::Invalid;
+  if(!data||!n||offset%kChunk||offset>=size||n!=(size-offset<kChunk?size-offset:kChunk))return Error::Invalid;
+  if(offset<received)return n<=received-offset&&!std::memcmp(bytes_+offset,data,n)?Error::Ok:Error::Conflict;
+  const uint32_t slot=(offset-received)/kChunk;
+  if(slot>=8)return Error::Offset;
+  if(bitmap&(1u<<slot))return std::memcmp(bytes_+offset,data,n)?Error::Conflict:Error::Ok;
+  std::memcpy(bytes_+offset,data,n);bitmap|=1u<<slot;
+  while(bitmap&1u){received+=size-received<kChunk?size-received:kChunk;bitmap>>=1;}
+  return Error::Ok;
 }
 Error Staging::seal(uint32_t id,Hash hash) {
   if(id!=transfer)return Error::WrongTransfer;

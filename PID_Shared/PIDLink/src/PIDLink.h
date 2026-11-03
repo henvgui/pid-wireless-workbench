@@ -5,6 +5,7 @@
 namespace pidlink {
 constexpr uint8_t kChannel=1;
 using AuxReceiver=bool (*)(const uint8_t*,size_t,uint32_t);
+using AuxTransmitted=void (*)(const uint8_t*,size_t,uint32_t);
 class Radio {
  public:
   bool begin(Role role);
@@ -22,7 +23,8 @@ class Radio {
   uint32_t dropped() const;
   uint32_t deliveryFailures() const;
   void setAuxReceiver(AuxReceiver receiver);
-  bool sendAux(const uint8_t* bytes,size_t size);
+  void setAuxTransmitted(AuxTransmitted callback);
+  bool sendAux(const uint8_t* bytes,size_t size,bool priority=false);
  private:
   Engine engine_;
   Role role_=Role::Host;

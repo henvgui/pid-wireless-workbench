@@ -23,7 +23,7 @@ from flash_stm32 import Link, target_profile, validate_image
 from serial.tools import list_ports
 from serial_terminal import SerialTerminal
 
-VERSION = "2026.10.24.3"
+VERSION = "2026.11.03.1"
 DATA_DIR = Path(os.environ.get("PID_WORKBENCH_DATA", str(Path(os.environ.get("LOCALAPPDATA", APP_DIR)) / "PIDWorkbench")))
 CHIPS = [{"id": name, "label": name, "flash_kb": kb, "profile": profile,
           "device_id": ident, "interfaces": ["uart","swd"] if profile.startswith("f407") else ["uart"],
@@ -73,6 +73,9 @@ def capabilities():
             "api_version": "v1", "base_address": "0x08000000",
             "formats": ["bin"], "job_policy": "single_active_job; persistent idempotency; no automatic erase replay",
             "target_pid_protocol_implemented": False,
+            "firmware_transfer": {"negotiated": True,"radio_chunk_bytes":192,"window_packets":8,
+                                  "usb_batch_bytes":3072,"host_cache_bytes":6144,"fallback":"legacy_stop_wait",
+                                  "integrity":"packet_crc32 + staged_sha256 + full_target_readback"},
             "serial_log": {"available": True, "rx_pin": 44, "interface": "H1 UART0", "direction": "receive_only", "buffer_bytes": 32768},
             "wireless_serial": {"channels": ["h2", "h1", "loopback"], "tx_pin": 17, "rx_pin": 18,
                                 "max_send_bytes": 1024, "idempotency_required": True, "flash_pause_resume": True}}

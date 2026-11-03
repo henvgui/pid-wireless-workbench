@@ -110,7 +110,7 @@ int main() {
     const size_t size=encode(capture,bytes);
     assert(decode(bytes,size,decoded)&&decoded.op==op&&decoded.offset==500&&decoded.length==capture.length);
     bytes[size-1]^=1;assert(!decode(bytes,size,decoded));bytes[size-1]^=1;
-    bytes[3]=uint8_t(Op::SerialReply)+1;put32(bytes+28+capture.length,crc32(bytes,28+capture.length));
+    bytes[3]=uint8_t(Op::BulkAck)+1;put32(bytes+28+capture.length,crc32(bytes,28+capture.length));
     assert(!decode(bytes,size,decoded));
   }
   std::mt19937 rng(12345);unsigned dropped=0,replayed=0;

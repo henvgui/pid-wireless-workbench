@@ -23,7 +23,7 @@ const TargetProfile* profile(Target target);
 bool capacityValid(Target target,uint32_t kb);
 bool interfaceValid(Target target,Interface interface);
 uint32_t eraseUnits(Target target,uint32_t size);
-enum class Op:uint8_t { Begin=1,Data,Seal,Flash,Query,Abort,Reply,EchoOpen,EchoData,EchoClose,EchoReply,UartRead,UartReply,MotorStatus,MotorReply,MotorTarget,LogOpen,LogRead,LogClose,LogReply,SerialOpen,SerialRead,SerialWrite,SerialClose,SerialReply };
+enum class Op:uint8_t { Begin=1,Data,Seal,Flash,Query,Abort,Reply,EchoOpen,EchoData,EchoClose,EchoReply,UartRead,UartReply,MotorStatus,MotorReply,MotorTarget,LogOpen,LogRead,LogClose,LogReply,SerialOpen,SerialRead,SerialWrite,SerialClose,SerialReply,BulkOpen,BulkData,BulkAck };
 enum class State:uint8_t { Idle,Receiving,Ready,Programming,Done,Failed };
 enum class Error:uint8_t { Ok,Invalid,Busy,WrongTransfer,Offset,Conflict,Incomplete,Hash,Vector,
   Disabled,NoMemory,Timeout,Nack,Unsupported,Device,Capacity,Verify,Stale,Link,
@@ -49,6 +49,7 @@ class Staging {
   void storage(uint8_t* bytes,uint32_t capacity=kMaxImage) { bytes_=bytes;capacity_=capacity; }
   Error begin(uint32_t transfer,uint32_t size,uint32_t flashKb,const uint8_t* digest,Target target=Target::G431,Interface interface=Interface::Uart);
   Error append(uint32_t transfer,uint32_t offset,const uint8_t* data,size_t size);
+  Error appendWindow(uint32_t transfer,uint32_t offset,const uint8_t* data,size_t size,uint32_t& bitmap);
   Error seal(uint32_t transfer,Hash hash);
   Error abort(uint32_t transfer);
   bool busy() const { return state==State::Programming; }

@@ -15,6 +15,9 @@
 #if defined(PID_HOST_LOCAL)
 #include "host_local_app.h"
 #endif
+#if defined(PID_FLASH_ENABLED)
+#include "PIDFlash.h"
+#endif
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S3) || ARDUINO_USB_MODE != 1 || ARDUINO_USB_CDC_ON_BOOT != 1
 #error "Select ESP32-S3 with native hardware USB CDC enabled."
@@ -450,12 +453,22 @@ void serviceUSB(uint32_t now) {
     collecting = overflow = false; commandLength = 0;
     Serial.print("ERR incomplete command; send a newline\n"); replied = true;
   }
-  for (uint16_t count=0;count<256 && Serial.available()>0;++count) {
+  for (uint16_t count=0;count<1024 && Serial.available()>0;++count) {
 #if defined(PID_HOST_LOCAL)
-    if (!hostapp::canAcceptCommand()) break;
+    if (!hostapp::canAcceptCommand()
+#if defined(PID_FLASH_ENABLED)
+        &&!pidflash::hostBinaryReading()&&!pidflash::hostBulkActive()
+#endif
+        ) break;
 #endif
     const int value = Serial.read();
     if (value<0) break;
+#if defined(PID_FLASH_ENABLED)
+    if(pidflash::hostBinaryByte(uint8_t(value),now))continue;
+#endif
+#if defined(PID_HOST_LOCAL)
+    if(!hostapp::canAcceptCommand())continue;
+#endif
     const char c = static_cast<char>(value);
     if (skipLF) { skipLF = false; if (c=='\n') continue; }
     if (collecting) {
@@ -508,7 +521,7 @@ void render(uint32_t now) {
 void setup() {
 #if defined(PID_FLASH_ENABLED)
   // A 128-byte block uses 256 hex characters plus command metadata/newline.
-  Serial.setRxBufferSize(1024);
+  Serial.setRxBufferSize(8192);
 #endif
   Serial.begin(115200);
   Serial.setDebugOutput(false);

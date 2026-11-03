@@ -14,19 +14,26 @@ const uint8_t slaveMac[6]={0x44,0x1b,0xf6,0x8d,0x10,0x18};
 uint8_t peerMac[6]={};
 portMUX_TYPE mux=portMUX_INITIALIZER_UNLOCKED;
 constexpr size_t kInboxBytes=250;
-uint8_t inbox[8][kInboxBytes]={};
-uint16_t inboxSize[8]={};
+constexpr uint8_t kInboxCount=32;
+uint8_t inbox[kInboxCount][kInboxBytes]={};
+uint16_t inboxSize[kInboxCount]={};
+struct AuxItem {uint8_t bytes[kInboxBytes];uint16_t size;};
+AuxItem urgent[8],normal[16];
+uint8_t urgentRead=0,urgentWrite=0,urgentCount=0,normalRead=0,normalWrite=0,normalCount=0;
+bool sending=false;
 AuxReceiver auxReceiver=nullptr;
+AuxTransmitted auxTransmitted=nullptr;
 uint8_t readAt=0,writeAt=0,count=0;
 uint32_t droppedCount=0,deliveryFailureCount=0;
 void onReceive(const uint8_t* mac,const uint8_t* data,int length) {
   if (!mac || !data || length<=0 || length>int(kInboxBytes) || std::memcmp(mac,peerMac,6)) return;
   portENTER_CRITICAL(&mux);
-  if (count==8) ++droppedCount;
-  else { std::memcpy(inbox[writeAt],data,size_t(length)); inboxSize[writeAt]=length; writeAt=(writeAt+1)%8; ++count; }
+  if (count==kInboxCount) ++droppedCount;
+  else { std::memcpy(inbox[writeAt],data,size_t(length)); inboxSize[writeAt]=length; writeAt=(writeAt+1)%kInboxCount; ++count; }
   portEXIT_CRITICAL(&mux);
 }
 void onSend(const uint8_t*,esp_now_send_status_t result) {
+  portENTER_CRITICAL(&mux);sending=false;portEXIT_CRITICAL(&mux);
   if (result!=ESP_NOW_SEND_SUCCESS) {
     portENTER_CRITICAL(&mux); ++deliveryFailureCount; portEXIT_CRITICAL(&mux);
   }
@@ -35,7 +42,7 @@ void onSend(const uint8_t*,esp_now_send_status_t result) {
 Radio radio;
 bool Radio::begin(Role role) {
   role_=role; enabled_=true; ready_=false; error_=ESP_OK;
-  portENTER_CRITICAL(&mux); readAt=writeAt=count=0; portEXIT_CRITICAL(&mux);
+  portENTER_CRITICAL(&mux); readAt=writeAt=count=0;urgentRead=urgentWrite=urgentCount=normalRead=normalWrite=normalCount=0;sending=false;portEXIT_CRITICAL(&mux);
   WiFi.persistent(false); WiFi.setAutoReconnect(false);
   if (!WiFi.mode(WIFI_STA)) { error_=ESP_FAIL; return false; }
   WiFi.disconnect(false,false);
@@ -69,10 +76,10 @@ bool Radio::enable(bool value) {
 }
 void Radio::receive(uint32_t now) {
   if (!ready_) return;
-  for (unsigned i=0;i<8;++i) {
+  for (unsigned i=0;i<kInboxCount;++i) {
     uint8_t bytes[kInboxBytes]; size_t length=0; bool available=false;
     portENTER_CRITICAL(&mux);
-    if (count) { length=inboxSize[readAt]; std::memcpy(bytes,inbox[readAt],length); readAt=(readAt+1)%8; --count; available=true; }
+    if (count) { length=inboxSize[readAt]; std::memcpy(bytes,inbox[readAt],length); readAt=(readAt+1)%kInboxCount; --count; available=true; }
     portEXIT_CRITICAL(&mux);
     if (!available) break;
     if (length>=2 && bytes[0]=='P' && bytes[1]=='F') {
@@ -87,17 +94,34 @@ void Radio::receive(uint32_t now) {
 }
 void Radio::transmit(uint32_t now) {
   if (!ready_) return;
-  Frame frame; if (!engine_.next(now,frame)) return;
-  uint8_t bytes[kFrameSize]; encode(frame,bytes);
-  const esp_err_t result=esp_now_send(peerMac,bytes,sizeof(bytes));
+  portENTER_CRITICAL(&mux);bool busy=sending;portEXIT_CRITICAL(&mux);if(busy)return;
+  uint8_t bytes[kInboxBytes];size_t size=0;bool auxiliary=false,high=false;
+  Frame frame;
+  if(engine_.next(now,frame)){encode(frame,bytes);size=kFrameSize;}
+  else {
+    portENTER_CRITICAL(&mux);
+    if(urgentCount){auto& item=urgent[urgentRead];size=item.size;std::memcpy(bytes,item.bytes,size);high=true;}
+    else if(normalCount){auto& item=normal[normalRead];size=item.size;std::memcpy(bytes,item.bytes,size);}
+    portEXIT_CRITICAL(&mux);auxiliary=true;
+  }
+  if(!size)return;
+  portENTER_CRITICAL(&mux);sending=true;portEXIT_CRITICAL(&mux);
+  const esp_err_t result=esp_now_send(peerMac,bytes,size);
   if (result==ESP_OK) ++sent_;
-  else { portENTER_CRITICAL(&mux); ++deliveryFailureCount; portEXIT_CRITICAL(&mux); }
+  portENTER_CRITICAL(&mux);
+  if(result!=ESP_OK){sending=false;++deliveryFailureCount;}
+  else if(auxiliary){if(high){urgentRead=(urgentRead+1)%8;--urgentCount;}else{normalRead=(normalRead+1)%16;--normalCount;}}
+  portEXIT_CRITICAL(&mux);
+  if(result==ESP_OK&&auxiliary&&auxTransmitted)auxTransmitted(bytes,size,millis());
 }
 void Radio::setAuxReceiver(AuxReceiver receiver) { auxReceiver=receiver; }
-bool Radio::sendAux(const uint8_t* bytes,size_t size) {
+void Radio::setAuxTransmitted(AuxTransmitted callback){auxTransmitted=callback;}
+bool Radio::sendAux(const uint8_t* bytes,size_t size,bool priority) {
   if (!ready_ || !bytes || !size || size>kInboxBytes) return false;
-  if (esp_now_send(peerMac,bytes,size)!=ESP_OK) return false;
-  ++sent_; return true;
+  bool accepted=false;portENTER_CRITICAL(&mux);
+  if(priority&&urgentCount<8){auto& item=urgent[urgentWrite];item.size=size;std::memcpy(item.bytes,bytes,size);urgentWrite=(urgentWrite+1)%8;++urgentCount;accepted=true;}
+  else if(!priority&&normalCount<16){auto& item=normal[normalWrite];item.size=size;std::memcpy(item.bytes,bytes,size);normalWrite=(normalWrite+1)%16;++normalCount;accepted=true;}
+  portEXIT_CRITICAL(&mux);return accepted;
 }
 uint32_t Radio::dropped() const {
   portENTER_CRITICAL(&mux); const uint32_t result=droppedCount; portEXIT_CRITICAL(&mux); return result;
