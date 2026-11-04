@@ -16,6 +16,16 @@ internal sealed class DownloadProgress
     internal bool Finished, Verified, Checked, HasProgress, TargetHalted;
     internal readonly Stopwatch Clock = Stopwatch.StartNew();
     internal long FinishedAt;
+    internal void Restart()
+    {
+        lock (Gate)
+        {
+            Phase = "重新连接"; Detail = "正在检查上次任务、重新识别设备并准备重试…";
+            RecordPath = Error = ""; Percent = ExitCode = 0; Stage = -1;
+            Finished = Verified = Checked = HasProgress = TargetHalted = false;
+            FinishedAt = 0; Clock.Restart();
+        }
+    }
     private static readonly Regex ProgressLine = new Regex(@"^\[PID\] (queued|validate|probe|transfer|erase|write|verify|start|done) (\d+)%(?: bytes=(\d+)/(\d+) speed=(\d+))?\s*$");
     private static readonly string[] Codes = { "validate", "transfer", "erase", "write", "verify", "start" };
     private static readonly string[] Names = { "检查芯片与固件", "无线传输固件", "擦除目标 Flash", "写入程序", "读回校验", "启动目标程序" };
@@ -129,12 +139,15 @@ internal sealed class DownloadProgressWindow : Form
     private readonly DownloadProgress state;
     private readonly Label phase, detail, elapsed, percent, footer;
     private readonly Label[] stages = new Label[6];
-    private readonly Button logs, hide;
+    private readonly Button logs, hide, retry;
     private readonly LiveProgressBar bar;
     private readonly Timer timer = new Timer();
     private readonly bool preview;
     private bool closing;
+    private readonly Stopwatch lifetime = Stopwatch.StartNew();
+    private long retryReadyAt;
     private readonly Color accent = Color.FromArgb(46, 210, 197);
+    internal event Action<string> RetryRequested;
 
     private Label TextLabel(string value, int x, int y, int w, int h, float size, Color color)
     {
@@ -190,6 +203,9 @@ internal sealed class DownloadProgressWindow : Form
         detail = TextLabel("", 24, 219, 510, 45, 9f, Color.FromArgb(171, 189, 209));
         elapsed = TextLabel("已用时 0.0 秒", 25, 291, 170, 25, 9f, Color.FromArgb(145, 165, 188));
         footer = TextLabel("完成后自动收起，结果保留在 Keil 输出区", 24, 266, 510, 20, 8f, Color.FromArgb(104, 124, 147));
+        retry = ActionButton("重新烧录", 214, 108);
+        retry.Visible = false;
+        retry.Click += delegate { RequestRetry(); };
         logs = ActionButton("打开日志", 330, 98);
         logs.Enabled = false;
         logs.Click += delegate { OpenLog(); };
@@ -208,6 +224,22 @@ internal sealed class DownloadProgressWindow : Form
         RefreshProgress(true);
         ResumeLayout(false);
         PerformLayout();
+    }
+
+    private void RequestRetry()
+    {
+        string path;
+        lock (state.Gate)
+        {
+            if (!state.Finished || state.ExitCode == 0 || closing || RetryRequested == null || lifetime.ElapsedMilliseconds < retryReadyAt) return;
+            retryReadyAt = lifetime.ElapsedMilliseconds + 500;
+            path = state.RecordPath;
+            state.Restart();
+        }
+        retry.Enabled = false;
+        bar.DisplayValue = 0;
+        RefreshProgress(true);
+        RetryRequested(path);
     }
 
     private void OpenLog()
@@ -238,11 +270,14 @@ internal sealed class DownloadProgressWindow : Form
             elapsed.Text = "已用时 " + (elapsedMs / 1000.0).ToString("F1") + " 秒";
             logs.Enabled = state.RecordPath.Length > 0;
             hide.Text = state.Finished ? "关闭" : "收起";
+            retry.Visible = state.Finished && state.ExitCode != 0;
+            retry.Enabled = retry.Visible && !closing && lifetime.ElapsedMilliseconds >= retryReadyAt;
+            footer.Text = "完成后自动收起，结果保留在 Keil 输出区";
             if (state.Finished)
             {
-                footer.Text = state.ExitCode == 0 ? "结果已返回 Keil，即将自动收起" : "错误已返回 Keil，8 秒后自动收起；可打开日志查看";
-                long wait = state.ExitCode == 0 ? 600 : 8000;
-                if (!preview && (!Visible || state.Clock.ElapsedMilliseconds - state.FinishedAt >= wait))
+                footer.Text = state.ExitCode == 0 ? "结果已返回 Keil，即将自动收起" : "可重新烧录、打开日志，或关闭窗口返回 Keil";
+                if (!preview && state.ExitCode != 0 && !Visible) { Show(); Activate(); }
+                if (!preview && state.ExitCode == 0 && (!Visible || state.Clock.ElapsedMilliseconds - state.FinishedAt >= 600))
                 {
                     closing = true;
                     Close();
@@ -301,9 +336,26 @@ internal sealed class DownloadProgressWindow : Form
                     window.DrawToBitmap(bitmap, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
                     bitmap.Save(Path.Combine(directory, sample + ".png"));
                 }
+                bool canRetry = window.retry.Visible && window.retry.Enabled;
+                if (canRetry != (sample == "failure")) throw new Exception("Retry must only be available after failure");
+                if (sample == "failure")
+                {
+                    int retries = 0;
+                    progress.RecordPath = Path.Combine(directory, "attempt.json");
+                    window.RetryRequested += delegate(string path) {
+                        if (path != Path.Combine(directory, "attempt.json")) throw new Exception("Retry lost the previous record");
+                        ++retries;
+                    };
+                    window.retry.PerformClick();
+                    window.RequestRetry();
+                    if (retries != 1 || progress.Finished || progress.Percent != 0 || progress.Error != "" || progress.RecordPath != "")
+                        throw new Exception("Retry did not reset state or allowed a duplicate click");
+                    progress.Line("[PID] write 78%");
+                    progress.Complete(1);
+                }
                 if (report.Length > 12) report.Append(',');
                 report.Append("{\"name\":\"").Append(sample).Append("\",\"percent\":").Append(progress.Percent)
-                    .Append(",\"dpi\":").Append(window.DeviceDpi).Append(",\"pmv2\":true}");
+                    .Append(",\"dpi\":").Append(window.DeviceDpi).Append(",\"pmv2\":true,\"retry\":").Append(canRetry ? "true" : "false").Append("}");
             }
         }
         report.Append("]}");

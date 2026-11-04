@@ -207,6 +207,60 @@ def execute_record(path, timeout=1800, resume=False):
         raise
 
 
+def retry_record(path, timeout=1800):
+    """An explicit user retry: reconcile the old intent before another erase."""
+    path = path.resolve(strict=True)
+    previous = json.loads(path.read_text(encoding="utf-8"))
+    spec = previous["request"]
+    image = Path(spec["firmware"]).read_bytes()
+    if hashlib.sha256(image).hexdigest() != spec["expected_sha256"]:
+        raise ValueError("Recorded image changed; refusing to retry")
+    if previous.get("status") in ("succeeded", "checked"):
+        raise ValueError("This attempt already completed; retry is for failed downloads")
+    emit(path.parent, "Record " + str(path))
+    emit(path.parent, "Checking the previous task before retrying.")
+    # Resolve a lost POST response by its persisted key. Looking up the list is
+    # read-only; never manufacture a fresh key while its outcome is unknown.
+    jobs = request("/v1/jobs")["data"]
+    matches = [job for job in jobs if job.get("idempotency_key") == spec["idempotency_key"]
+               or previous.get("job_id") and job.get("id") == previous["job_id"]]
+    if len(matches) > 1:
+        raise ValueError("Previous task identity is ambiguous; no new download submitted")
+    prior = matches[0] if matches else None
+    if prior:
+        if (prior.get("spec") or {}).get("sha256") != spec["expected_sha256"]:
+            raise ValueError("Previous task image differs; no new download submitted")
+        if prior["state"] in ("queued", "running", "succeeded"):
+            previous["job_id"] = prior["id"]
+            save(path, previous)
+            emit(path.parent, "Continuing the existing task; no second erase requested.")
+            return execute_record(path, timeout, resume=True)
+        if prior["state"] not in ("failed", "interrupted"):
+            raise ValueError("Previous task is not in a retryable state")
+    elif previous.get("job_id"):
+        raise ValueError("Previous task cannot be found; refusing to duplicate an uncertain download")
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    directory = path.parent.parent / (stamp + "_retry_" + secrets.token_hex(4))
+    directory.mkdir(parents=True, exist_ok=False)
+    snapshot = directory / "firmware.bin"
+    snapshot.write_bytes(image)
+    retry = dict(spec, port="auto")  # Rescan host USB identity, including changed COM numbers.
+    if prior:
+        # A terminal failed task cannot be rerun with its old key. This click is
+        # the new intent; keep that key fixed for all responses/retries below.
+        retry.update(firmware=str(snapshot), idempotency_key="keil-" + secrets.token_hex(16))
+    # If no job exists, preserve the original key and snapshot path so a racing
+    # or lost original submission is resolved by the API's idempotency check.
+    record = {"version": 1, "source": previous.get("source"), "project": previous.get("project"),
+              "request": retry, "status": "prepared", "previous_attempt": str(path),
+              "retry_mode": "new_after_failure" if prior else "resolve_original_intent"}
+    destination = directory / "attempt.json"
+    save(destination, record)
+    emit(directory, "Record " + str(destination))
+    emit(directory, "Retry requested: rescan host USB; use the recorded firmware SHA256 " + spec["expected_sha256"])
+    return execute_record(destination, timeout)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--firmware", type=Path)
@@ -216,16 +270,20 @@ def main(argv=None):
     parser.add_argument("--project", type=Path)
     parser.add_argument("--fromelf", type=Path)
     parser.add_argument("--records-dir", type=Path)
-    parser.add_argument("--resume", type=Path)
+    recovery = parser.add_mutually_exclusive_group()
+    recovery.add_argument("--resume", type=Path)
+    recovery.add_argument("--retry-record", type=Path, help="Explicit user retry of a failed attempt; reconcile prior job, rescan USB, preserve image")
     parser.add_argument("--check", action="store_true", help="Conversion/validation only, no API or target writes")
     parser.add_argument("--no-run", action="store_true")
     parser.add_argument("--timeout", type=float, default=1800)
     args = parser.parse_args(argv)
     if not args.timeout > 0 or args.timeout == float("inf"):
         parser.error("timeout must be finite and positive")
-    if args.resume:
+    if args.resume or args.retry_record:
         if args.firmware or args.check:
-            parser.error("--resume cannot be combined with --firmware/--check")
+            parser.error("--resume/--retry-record cannot be combined with --firmware/--check")
+        if args.retry_record:
+            return retry_record(args.retry_record, args.timeout)
         return execute_record(args.resume.resolve(strict=True), args.timeout, resume=True)
     if not args.firmware:
         parser.error("--firmware is required unless resuming")

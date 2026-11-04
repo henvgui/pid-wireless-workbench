@@ -1,5 +1,7 @@
 # AI 接入与调用约定
 
+2026-11-04：Keil 失败窗口支持手动“重新烧录”。脚本可用 `integrations/keil/pid_keil.py --retry-record <attempt.json>` 执行同一流程：先核对原任务，运行中任务续查，明确失败后才新建烧录意图；固件使用原快照，并重新识别 USB。`--resume` 仍只续查原记录。[重试规则](docs/KEIL_DOWNLOAD.md#日志与异常恢复)。
+
 从机 20261103.3：F407 SWD 的 `start_ack` 增加系统复位、Flash 入口/SP 和中断上下文检查，修复下载后应用串口不恢复的问题；HTTP/CLI 请求不变。原始调试可在从机 USB 查询只读缓存 `!starttrace`，`step=6` 为本次启动检查完成，不代表任意目标应用的业务功能正常。[修复与收发验收](docs/UART_RESUME_FIX_20261103.md)。
 
 2026.11.03.2：F407 SWD 默认使用 `ram_1k` SRAM 烧录器，现有调用不变。`capabilities.swd_programmer` 描述能力；任务结果增加 `algorithm`、`target_program_seconds`，完整目标读回仍为必需。手动使用旧写入算法可加 CLI `--swd-legacy` 或 flash 请求 `"swd_legacy": true`（仅 SWD）。失败后不自动换算法或重擦除；先查原任务，明确重烧再用新幂等键。[算法、SRAM 布局与回退](../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。

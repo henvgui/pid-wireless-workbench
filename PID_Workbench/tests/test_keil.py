@@ -162,6 +162,98 @@ class JobTests(unittest.TestCase):
         api.assert_not_called()
 
 
+class RetryTests(unittest.TestCase):
+    def setUp(self):
+        JobTests.setUp(self)
+        self.path = self.root / "records" / "original" / "attempt.json"
+        self.path.parent.mkdir(parents=True)
+        self.saved["status"] = "attention_required"
+        bridge.save(self.path, self.saved)
+        self.prior = dict(self.job, state="failed", idempotency_key=self.spec["idempotency_key"])
+
+    def test_failed_job_gets_new_key_same_snapshot_and_rescans_usb(self):
+        def execute(path, timeout):
+            saved = json.loads(path.read_text())
+            self.assertEqual(saved["previous_attempt"], str(self.path))
+            self.assertEqual(saved["retry_mode"], "new_after_failure")
+            self.assertNotEqual(saved["request"]["idempotency_key"], self.spec["idempotency_key"])
+            self.assertEqual(saved["request"]["port"], "auto")
+            self.assertEqual(Path(saved["request"]["firmware"]).read_bytes(), IMAGE)
+            for field in ("chip", "target_interface", "expected_sha256", "run"):
+                self.assertEqual(saved["request"][field], self.spec[field])
+            return 0
+        with patch.object(bridge, "request", return_value={"data": [self.prior]}) as api, \
+             patch.object(bridge, "execute_record", side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bridge.retry_record(self.path), 0)
+        api.assert_called_once_with("/v1/jobs")
+        self.assertEqual(json.loads(self.path.read_text())["status"], "attention_required")
+
+    def test_active_or_already_succeeded_job_is_resumed_without_new_intent(self):
+        for state in ("queued", "running", "succeeded"):
+            bridge.save(self.path, self.saved)
+            with patch.object(bridge, "request", return_value={"data": [dict(self.prior, state=state)]}) as api, \
+                 patch.object(bridge, "execute_record", return_value=0) as execute, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(bridge.retry_record(self.path, timeout=45), 0)
+            api.assert_called_once_with("/v1/jobs")
+            execute.assert_called_once_with(self.path, 45, resume=True)
+            self.assertEqual(json.loads(self.path.read_text())["job_id"], "testjob")
+            self.assertEqual(json.loads(self.path.read_text())["request"], self.spec)
+
+    def test_missing_submit_response_keeps_key_and_original_snapshot_path(self):
+        with patch.object(bridge, "request", return_value={"data": []}), \
+             patch.object(bridge, "execute_record", return_value=0) as execute, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bridge.retry_record(self.path), 0)
+        new = json.loads(execute.call_args.args[0].read_text())
+        self.assertEqual(new["request"]["idempotency_key"], self.spec["idempotency_key"])
+        self.assertEqual(new["request"]["firmware"], self.spec["firmware"])
+        self.assertEqual(new["retry_mode"], "resolve_original_intent")
+
+    def test_known_job_missing_or_task_lookup_failure_never_submits(self):
+        bridge.save(self.path, dict(self.saved, job_id="missing"))
+        for response in ({"data": []}, OSError("API offline")):
+            with patch.object(bridge, "request", side_effect=[response]), \
+                 patch.object(bridge, "execute_record") as execute, contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises((ValueError, OSError)):
+                    bridge.retry_record(self.path)
+            execute.assert_not_called()
+
+    def test_changed_image_or_successful_record_never_calls_api(self):
+        for success in (False, True):
+            Path(self.spec["firmware"]).write_bytes(IMAGE if success else IMAGE+b"x")
+            bridge.save(self.path, dict(self.saved, status="succeeded" if success else "attention_required"))
+            with patch.object(bridge, "request") as api, self.assertRaises(ValueError):
+                bridge.retry_record(self.path)
+            api.assert_not_called()
+
+    def test_previous_task_wrong_hash_is_rejected(self):
+        prior = dict(self.prior, spec={"sha256": "wrong"})
+        with patch.object(bridge, "request", return_value={"data": [prior]}), \
+             patch.object(bridge, "execute_record") as execute, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(ValueError):bridge.retry_record(self.path)
+        execute.assert_not_called()
+
+    def test_explicit_retry_submits_exactly_once_and_verifies_result(self):
+        posts = []
+        def api(path, spec=None):
+            if path == "/v1/jobs" and spec is None:return {"data": [self.prior]}
+            if path == "/v1/jobs":
+                posts.append(spec)
+                self.assertNotEqual(spec["idempotency_key"], self.spec["idempotency_key"])
+                self.assertEqual(Path(spec["firmware"]).read_bytes(), IMAGE)
+                return {"data": dict(self.job, id="retryjob")}
+            self.assertEqual(path, "/v1/jobs/retryjob")
+            return {"data": dict(self.job, id="retryjob")}
+        with patch.object(bridge, "request", side_effect=api), patch.object(bridge, "preflight", return_value={}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bridge.retry_record(self.path), 0)
+        self.assertEqual(len(posts), 1)
+
+    def test_retry_cli_cannot_also_resume_or_replace_the_image(self):
+        for extra in (["--resume",str(self.path)],["--firmware",self.spec["firmware"]],["--check"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                bridge.main(["--retry-record",str(self.path)]+extra)
+
+
 class ConfigureTests(unittest.TestCase):
     def test_only_utilities_changed_backup_and_repeat_are_safe(self):
         with tempfile.TemporaryDirectory(prefix="keil project ") as tmp:

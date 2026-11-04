@@ -2,6 +2,7 @@
 // stdout/stderr still go to the inherited Keil output pipe; child exit codes
 // are preserved. Build with /target:winexe, never /target:exe.
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -97,6 +98,27 @@ internal static class KeilDownloadLauncher
         }
     }
 
+    private static string[] RetryArguments(string[] original, string recordPath)
+    {
+        if (original.Length < 2 || !File.Exists(original[1]) || !File.Exists(recordPath))
+            return (string[])original.Clone(); // Conversion/launch failed before a record was saved.
+        List<string> result = new List<string>(new string[] { original[0], original[1], "--retry-record", recordPath });
+        for (int i = 2; i + 1 < original.Length; ++i)
+            if (original[i] == "--timeout") { result.Add(original[i]); result.Add(original[i + 1]); break; }
+        return result.ToArray();
+    }
+
+    private static void StartWorker(string[] args)
+    {
+        Thread worker = new Thread(delegate()
+        {
+            int exitCode = RunChild(args);
+            progress.Complete(exitCode);
+        });
+        worker.IsBackground = true;
+        worker.Start();
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -118,13 +140,12 @@ internal static class KeilDownloadLauncher
                 window.Location = new System.Drawing.Point(-30000, -30000);
                 window.ShowInTaskbar = false;
             }
-            Thread worker = new Thread(delegate()
+            window.RetryRequested += delegate(string recordPath)
             {
-                int exitCode = RunChild(args);
-                progress.Complete(exitCode);
-            });
-            worker.IsBackground = true;
-            window.Shown += delegate { PidWorkbench.DpiSupport.MatchInitialMonitor(window); worker.Start(); };
+                try { StartWorker(RetryArguments(args, recordPath)); }
+                catch (Exception error) { Output("[PID] Launcher ERROR: " + error.Message); progress.Complete(1); }
+            };
+            window.Shown += delegate { PidWorkbench.DpiSupport.MatchInitialMonitor(window); StartWorker(args); };
             Application.Run(window);
             return progress.ExitCode;
         }
