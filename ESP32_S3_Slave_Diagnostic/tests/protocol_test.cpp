@@ -17,6 +17,10 @@ int main() {
   assert(parse("swdprobe",command) && command.kind==Kind::SwdProbe);
   assert(parse("ramcheck",command) && command.kind==Kind::RamCheck);
   assert(parse("starttrace",command) && command.kind==Kind::StartTrace);
+  assert(parse("identity",command)&&command.kind==Kind::Identity&&command.identity==255);
+  assert(parse("identity GREEN",command)&&command.identity==0);
+  assert(parse("identity BLUE",command)&&command.identity==1);
+  assert(!parse("identity green",command)&&!parse("identity UNKNOWN",command)&&!parse("identity RED extra",command));
   assert(!parse("ramcheck erase",command));
   assert(parse("swdunprotect ERASE_ALL_F407VE",command) && command.kind==Kind::SwdUnprotect);
   for(const char* text:{"swdunprotect","swdunprotect ERASE","swdunprotect erase_all_f407ve","swdunprotect ERASE_ALL_F407VE extra"})assert(!parse(text,command));

@@ -1,5 +1,7 @@
 # 主机与从机 ESP-NOW 第一版
 
+2026-11-04 完整版 `host_flash` / `slave_flash_psram` 已支持颜色身份和已登记从机选择：**双击 P 切换，P 单击无动作**，OLED 显示名称及序号。单台 GREEN 不会因再次选择而重连。操作、登记、占用限制及测试范围见 [从机选择指南](../PID_Workbench/docs/PEER_SELECTION.md)。下文绿色固定状态灯与默认环境说明为早期版本记录；新版状态灯使用从机保存的身份色。
+
 2026-10-17。当前默认：主机 `host_wireless`，从机 `slave_wireless`。
 
 本版完成两块 ESP32-S3 之间的参数和启停请求通信。主机继续负责四旋钮、OLED、原有 RGB 灯效、本地 SAVE 和 USB；从机接收完整参数快照并回传确认。两端启用 Wi-Fi 射频用于 ESP-NOW，不连接路由器。

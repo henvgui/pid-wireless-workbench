@@ -43,14 +43,56 @@ def validate_image(image, kb, target=None):
         raise ValueError(f"Invalid {target['name']} vector table; use a .bin linked at 0x08000000")
 
 
+NATIVE_ESP32_USB = (0x303a, 0x1001)
+LEGACY_HOST_SERIAL = "44:1B:F6:8D:10:20"
+LEGACY_SLAVE_SERIAL = "44:1B:F6:8D:10:18"
+_confirmed_hosts = set()
+
+
+def usb_role(port):
+    identity = (port.serial_number or "").upper()
+    if identity in _confirmed_hosts or identity == LEGACY_HOST_SERIAL:
+        return "host"
+    if identity == LEGACY_SLAVE_SERIAL:
+        return "slave"
+    return "other"
+
+
+def discover_hosts(devices):
+    """Identify a workbench host with a read-only query on native ESP32 USB."""
+    hosts = []
+    for port in devices:
+        if usb_role(port) == "host":
+            hosts.append(port.device)
+            continue
+        if not port.serial_number or (port.vid, port.pid) != NATIVE_ESP32_USB:
+            continue
+        link = None
+        try:
+            link = Link(port.device, write_timeout=.35)
+            link.query("!link", "link", lambda value: value.get("ack_scope") == "slave"
+                       and value.get("encrypted") is True and value.get("link_led_pin") == 38,
+                       timeout=.4)
+        except (OSError, RuntimeError):
+            continue
+        finally:
+            if link is not None:
+                link.close()
+        _confirmed_hosts.add(port.serial_number.upper())
+        hosts.append(port.device)
+    return hosts
+
+
 class Link:
-    def __init__(self, port=None):
+    def __init__(self, port=None, *, write_timeout=2):
         if not port:
-            port = next((p.device for p in list_ports.comports()
-                         if p.serial_number == "44:1B:F6:8D:10:20"), None)
-        if not port:
-            raise RuntimeError("Host not found; specify --port COMxx")
-        self.serial = serial.Serial(port=None, baudrate=115200, timeout=.05, write_timeout=2)
+            hosts = discover_hosts(list_ports.comports())
+            if len(hosts) > 1:
+                raise RuntimeError("Multiple PID Workbench hosts found; select a COM port")
+            if not hosts:
+                raise RuntimeError("PID Workbench host not found; check native USB and host_flash firmware")
+            port = hosts[0]
+        self.serial = serial.Serial(port=None, baudrate=115200, timeout=.05, write_timeout=write_timeout)
         self.serial.dtr, self.serial.rts, self.serial.port = True, False, port
         self.serial.open()
         self.buffer = b""
@@ -89,6 +131,8 @@ class Link:
             try:
                 value = json.loads(line)
             except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(value, dict):
                 continue
             if value.get("type") == "error":
                 raise RuntimeError(value)
@@ -186,6 +230,13 @@ def main():
         link.expected_profile = target["id"]
         link.expected_interface = args.interface
         initial = link.query("!get", "state")
+        peer_mac = initial.get("peer_mac")
+        if peer_mac is not None:
+            if not isinstance(peer_mac,str) or not re.fullmatch(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}",peer_mac):
+                raise RuntimeError("Invalid selected-slave identity")
+            if args.resume and previous.get("peer_mac") and previous["peer_mac"].lower()!=peer_mac.lower():
+                raise RuntimeError("Resume belongs to another slave; select the original device first")
+            record["peer_mac"],record["peer_name"]=peer_mac,initial.get("peer_name")
         original_stream = initial["stream"]
         link.query("!stream off", "state")
         link.query("!stop", "state")
@@ -198,6 +249,8 @@ def main():
                 raise RuntimeError("STOP has not been confirmed by the slave")
             time.sleep(.1)
         suffix = " swd" if args.interface == "swd" else ""
+        if peer_mac is not None:
+            suffix=" "+args.interface+" @"+peer_mac.replace(":","")
         begin_dispatched = True
         status = link.fw(f"!fw begin {tid} {len(image)} {kb} {digest} {target['name']}"+suffix, transfer, 1)
         chunk=negotiated_chunk(status)

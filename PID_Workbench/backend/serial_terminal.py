@@ -99,7 +99,7 @@ class SerialTerminal:
             self.closed = False
             self.last_error = None
             return dict(session=session, config=config, cursor=0, rx_pin=44 if h1 else 18, tx_pin=None if h1 else 17, tx_enabled=not h1,
-                        buffer_bytes=32768, slave="44:1B:F6:8D:10:18", status=result)
+                        buffer_bytes=32768, slave=result.get("peer_mac"), status=result)
         finally:
             if link is not None:
                 link.close()
@@ -155,7 +155,7 @@ class SerialTerminal:
                     break
             result = dict(session=session, next_cursor=cursor, chunks=chunks, dropped=dropped,
                           rx_errors=errors, paused=value.get("paused", False), pause_events=value.get("pause_events", 0),
-                          tx_total=self.tx_total, channel=self.config["channel"], slave="44:1B:F6:8D:10:18")
+                          tx_total=self.tx_total, channel=self.config["channel"], slave=value.get("peer_mac"))
             self.last_read_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
             if not read_failed:
                 self.last_error = None

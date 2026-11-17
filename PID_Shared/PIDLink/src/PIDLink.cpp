@@ -6,11 +6,10 @@
 #include "esp_wifi.h"
 #include "esp_system.h"
 #include "../private/pair_keys.h"
+#include "pair_devices.h"
 
 namespace pidlink {
 namespace {
-const uint8_t hostMac[6]={0x44,0x1b,0xf6,0x8d,0x10,0x20};
-const uint8_t slaveMac[6]={0x44,0x1b,0xf6,0x8d,0x10,0x18};
 uint8_t peerMac[6]={};
 portMUX_TYPE mux=portMUX_INITIALIZER_UNLOCKED;
 constexpr size_t kInboxBytes=250;
@@ -26,14 +25,17 @@ AuxTransmitted auxTransmitted=nullptr;
 uint8_t readAt=0,writeAt=0,count=0;
 uint32_t droppedCount=0,deliveryFailureCount=0;
 void onReceive(const uint8_t* mac,const uint8_t* data,int length) {
-  if (!mac || !data || length<=0 || length>int(kInboxBytes) || std::memcmp(mac,peerMac,6)) return;
+  if (!mac || !data || length<=0 || length>int(kInboxBytes)) return;
   portENTER_CRITICAL(&mux);
+  if(std::memcmp(mac,peerMac,6)){portEXIT_CRITICAL(&mux);return;}
   if (count==kInboxCount) ++droppedCount;
   else { std::memcpy(inbox[writeAt],data,size_t(length)); inboxSize[writeAt]=length; writeAt=(writeAt+1)%kInboxCount; ++count; }
   portEXIT_CRITICAL(&mux);
 }
-void onSend(const uint8_t*,esp_now_send_status_t result) {
-  portENTER_CRITICAL(&mux);sending=false;portEXIT_CRITICAL(&mux);
+void onSend(const uint8_t* mac,esp_now_send_status_t result) {
+  portENTER_CRITICAL(&mux);
+  if(!mac||std::memcmp(mac,peerMac,6)){portEXIT_CRITICAL(&mux);return;}
+  sending=false;portEXIT_CRITICAL(&mux);
   if (result!=ESP_NOW_SEND_SUCCESS) {
     portENTER_CRITICAL(&mux); ++deliveryFailureCount; portEXIT_CRITICAL(&mux);
   }
@@ -46,10 +48,13 @@ bool Radio::begin(Role role) {
   WiFi.persistent(false); WiFi.setAutoReconnect(false);
   if (!WiFi.mode(WIFI_STA)) { error_=ESP_FAIL; return false; }
   WiFi.disconnect(false,false);
-  uint8_t local[6]; error_=esp_wifi_get_mac(WIFI_IF_STA,local);
-  const uint8_t* expected=role==Role::Host?hostMac:slaveMac;
-  if (error_!=ESP_OK || std::memcmp(local,expected,6)) { error_=ESP_ERR_INVALID_ARG; return false; }
-  std::memcpy(peerMac,role==Role::Host?slaveMac:hostMac,6);
+  error_=esp_wifi_get_mac(WIFI_IF_STA,localMac_);
+  // Each new slave has its own factory MAC; the host roster authorizes which
+  // one can communicate. All slaves still bind to this host and encrypted key.
+  if(error_!=ESP_OK||!validPeerMac(localMac_)||(role==Role::Host&&std::memcmp(localMac_,kConfiguredHostMac,6))||
+      (role==Role::Slave&&!std::memcmp(localMac_,kConfiguredHostMac,6))){error_=ESP_ERR_INVALID_ARG;return false;}
+  if(role==Role::Host&&!validPeerMac(hostPeer_))std::memcpy(hostPeer_,kDefaultSlaveMac,6);
+  portENTER_CRITICAL(&mux);std::memcpy(peerMac,role==Role::Host?hostPeer_:kConfiguredHostMac,6);portEXIT_CRITICAL(&mux);
   error_=esp_wifi_set_ps(WIFI_PS_NONE);
   if (error_==ESP_OK) error_=esp_wifi_set_channel(kChannel,WIFI_SECOND_CHAN_NONE);
   if (error_==ESP_OK) error_=esp_now_init();
@@ -128,5 +133,26 @@ uint32_t Radio::dropped() const {
 }
 uint32_t Radio::deliveryFailures() const {
   portENTER_CRITICAL(&mux); const uint32_t result=deliveryFailureCount; portEXIT_CRITICAL(&mux); return result;
+}
+const uint8_t* Radio::peerAddress()const{return peerMac;}
+bool Radio::configurePeer(const uint8_t* mac){
+  if(role_!=Role::Host||!validPeerMac(mac)||!std::memcmp(mac,kConfiguredHostMac,6)){error_=ESP_ERR_INVALID_ARG;return false;}
+  if(!enabled_){std::memcpy(hostPeer_,mac,6);return true;}
+  if(!ready_){enable(false);std::memcpy(hostPeer_,mac,6);return begin(Role::Host);}
+  if(!std::memcmp(peerMac,mac,6))return true;
+  const uint32_t began=millis();
+  for(;;){portENTER_CRITICAL(&mux);const bool busy=sending;portEXIT_CRITICAL(&mux);
+    if(!busy)break;if(uint32_t(millis()-began)>=30){error_=ESP_ERR_INVALID_STATE;return false;}delay(1);}
+  esp_now_peer_info_t peer={};std::memcpy(peer.peer_addr,mac,6);std::memcpy(peer.lmk,kPairKey,16);
+  peer.channel=kChannel;peer.ifidx=WIFI_IF_STA;peer.encrypt=true;
+  error_=esp_now_add_peer(&peer);if(error_!=ESP_OK&&error_!=ESP_ERR_ESPNOW_EXIST)return false;
+  uint8_t old[6];
+  portENTER_CRITICAL(&mux);
+  std::memcpy(old,peerMac,6);std::memcpy(peerMac,mac,6);std::memcpy(hostPeer_,mac,6);
+  readAt=writeAt=count=0;urgentRead=urgentWrite=urgentCount=normalRead=normalWrite=normalCount=0;sending=false;
+  portEXIT_CRITICAL(&mux);
+  esp_now_del_peer(old);
+  uint32_t session=esp_random();if(!session||session==engine_.session())session=engine_.session()+1;if(!session)session=1;
+  engine_.begin(Role::Host,session);error_=ESP_OK;return true;
 }
 }  // namespace pidlink

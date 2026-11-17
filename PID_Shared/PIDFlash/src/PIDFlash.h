@@ -8,6 +8,8 @@ void pollSlave(uint32_t now);
 bool hostCommand(const char* text);
 bool hostPending();
 bool hostLocked();
+bool hostPeerSwitchAllowed(uint32_t now);
+void hostPeerChanged();
 bool hostBulkActive();
 bool hostBinaryReading();
 bool hostBinaryByte(uint8_t value,uint32_t now);

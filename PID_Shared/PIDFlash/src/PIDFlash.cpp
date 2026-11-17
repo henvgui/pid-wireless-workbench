@@ -32,6 +32,8 @@ namespace pidflash {
 namespace {
 Packet outgoing,lastRequest,lastReply;
 bool pending=false,replyReady=false,locked=false;
+bool hostSerialActive=false,hostLogActive=false;
+uint32_t motorOwner=0;
 uint32_t nextSequence=0,lastSend=0,retries=0,replyRetries=0;
 uint8_t attempts=0;
 Packet hostReply;
@@ -427,6 +429,7 @@ bool slaveReceive(const uint8_t* bytes,size_t n,uint32_t now) {
   if(p.op==Op::MotorStatus||p.op==Op::MotorTarget) {
     if(serialbridge::ownsPort()){echoFailure(p,Error::Busy);return true;}
     serialbridge::selectMotor();
+    motorOwner=p.sender;
     Packet reply;reply.op=Op::MotorReply;reply.sender=p.peer;reply.peer=p.sender;
     reply.transfer=p.transfer;reply.sequence=p.sequence;
     if(p.op==Op::MotorTarget) {
@@ -519,12 +522,14 @@ bool hostReceive(const uint8_t* bytes,size_t n,uint32_t now) {
   if(serialOp(outgoing.op)) {
     if(p.op==Op::SerialReply){if(p.length<32||p.length>128||p.data[0]!=uint8_t(outgoing.op)||p.data[5]!=1||p.data[7]>uint8_t(Error::Start))return false;}
     else if(p.op!=Op::Reply||p.length<2||!p.data[1]||p.data[1]>uint8_t(Error::Start))return false;
+    if(p.op==Op::SerialReply&&p.data[7]==0)hostSerialActive=(p.data[1]&1)!=0;
     hostReply=p;replyRetries=attempts?attempts-1:0;pending=false;replyReady=true;return true;
   }
   if(logOp(outgoing.op)) {
     if(p.op==Op::LogReply) {
       if(p.length<20||p.data[0]!=uint8_t(outgoing.op)||p.data[5]!=1)return false;
     } else if(p.op!=Op::Reply||p.length<2||!p.data[1]||p.data[1]>uint8_t(Error::Start))return false;
+    if(p.op==Op::LogReply)hostLogActive=p.data[1]!=0;
     hostReply=p;replyRetries=attempts?attempts-1:0;pending=false;replyReady=true;return true;
   }
   if(outgoing.op==Op::MotorStatus||outgoing.op==Op::MotorTarget) {
@@ -595,7 +600,8 @@ void pollSlave(uint32_t now) {
   pollUartRead(millis());
   serialbridge::poll(now,staging.state==State::Receiving||staging.state==State::Ready||staging.busy());
   motorbridge::poll(millis(),!serialbridge::blocksMotor()&&!echoActive&&!uartActive&&!swdHoldUntil&&
-      staging.state!=State::Receiving&&staging.state!=State::Ready&&!staging.busy()&&PID_FLASH_TARGET_ENABLE);
+      staging.state!=State::Receiving&&staging.state!=State::Ready&&!staging.busy()&&PID_FLASH_TARGET_ENABLE&&
+      motorOwner!=0&&motorOwner==pidlink::radio.engine().peerSession());
 }
 void pollHost(uint32_t now) {
   if(bulkHostActive&&bulkSender.error==Error::Ok) {
@@ -621,6 +627,11 @@ void pollHost(uint32_t now) {
 }
 bool hostPending(){return pending||replyReady;}
 bool hostLocked(){return locked||echoLocked||uartLocked;}
+bool hostPeerSwitchAllowed(uint32_t now){
+  return !hostPending()&&!hostLocked()&&!bulkHostActive&&!hostBinaryReading()&&
+      (!(hostSerialActive||hostLogActive)||!pidlink::radio.engine().online(now));
+}
+void hostPeerChanged(){hostSerialActive=hostLogActive=false;bulkNotice=false;}
 bool hostBulkActive(){return bulkHostActive;}
 bool hostBinaryReading(){return bulkDecoder.collecting()||bulkUsbQuarantine;}
 bool hostBinaryByte(uint8_t value,uint32_t) {
@@ -740,8 +751,16 @@ bool hostCommand(const char* text) {
   outgoing=Packet();outgoing.op=stream?Op::SerialOpen:log?Op::LogOpen:motor?Op::MotorStatus:uart?Op::UartRead:echo?Op::EchoOpen:Op::Query;
   char buffer[512];
   if(std::strlen(text)>=sizeof(buffer)){localError(Error::Invalid);return true;}
-  std::strcpy(buffer,text);char* save=nullptr;const char* w[8];unsigned count=0;
-  for(char* v=strtok_r(buffer," \t",&save);v;v=strtok_r(nullptr," \t",&save)){if(count==8){localError(Error::Invalid);return true;}w[count++]=v;}
+  std::strcpy(buffer,text);char* save=nullptr;const char* w[9];unsigned count=0;
+  for(char* v=strtok_r(buffer," \t",&save);v;v=strtok_r(nullptr," \t",&save)){if(count==9){localError(Error::Invalid);return true;}w[count++]=v;}
+  // Pin firmware begin to the selected MAC captured during PC preflight. The
+  // following transaction lock prevents switching until abort or completion.
+  if(count==9&&!std::strcmp(w[0],"fw")&&!std::strcmp(w[1],"begin")){
+    uint32_t transfer=0;numeric(w[2],transfer,16);outgoing.op=Op::Begin;
+    uint8_t expected[6];if(w[8][0]!='@'||!pidlink::parsePeerMac(w[8]+1,expected)||
+        std::memcmp(expected,pidlink::radio.peerAddress(),6)){localError(Error::Conflict,transfer);return true;}
+    --count;
+  }
   Packet p;bool valid=false;
   if(count>=3&&numeric(w[2],p.transfer,16)&&p.transfer) {
     if(stream) {
@@ -858,26 +877,28 @@ bool takeHostReply(char* out,size_t size) {
   replyReady=false;
   const Packet& p=hostReply;
   if(serialOp(outgoing.op)) {
+    char peer[18];pidlink::formatPeerMac(pidlink::radio.peerAddress(),peer);
     const bool valid=p.op==Op::SerialReply&&p.length>=32;
     const Error error=valid?Error(p.data[7]):Error(p.data[1]);
     char hexBytes[193];const char* digits="0123456789abcdef";
     const size_t length=valid?p.length-32:0;
     for(size_t i=0;i<length;++i){hexBytes[2*i]=digits[p.data[32+i]>>4];hexBytes[2*i+1]=digits[p.data[32+i]&15];}hexBytes[2*length]=0;
-    snprintf(out,size,"{\"type\":\"serial_stream\",\"id\":%lu,\"op\":%u,\"offset\":%lu,\"ok\":%s,\"error\":\"%s\",\"hex\":\"%s\",\"active\":%s,\"paused\":%s,\"epoch\":%lu,\"tx_total\":%lu,\"dropped\":%lu,\"rx_errors\":%lu,\"baud\":%lu,\"pause_events\":%lu,\"channel\":%u}",
+    snprintf(out,size,"{\"type\":\"serial_stream\",\"id\":%lu,\"op\":%u,\"offset\":%lu,\"ok\":%s,\"error\":\"%s\",\"hex\":\"%s\",\"active\":%s,\"paused\":%s,\"epoch\":%lu,\"tx_total\":%lu,\"dropped\":%lu,\"rx_errors\":%lu,\"baud\":%lu,\"pause_events\":%lu,\"channel\":%u,\"peer_mac\":\"%s\"}",
       (unsigned long)p.transfer,unsigned(outgoing.op),(unsigned long)p.offset,error==Error::Ok?"true":"false",errorName(error),hexBytes,
       valid&&(p.data[1]&1)?"true":"false",valid&&(p.data[1]&2)?"true":"false",(unsigned long)(valid?get32(p.data+8):0),
       (unsigned long)(valid?get32(p.data+12):0),(unsigned long)(valid?get32(p.data+16):0),(unsigned long)(valid?get32(p.data+20):0),
-      (unsigned long)(valid?get32(p.data+24):0),(unsigned long)(valid?get32(p.data+28):0),unsigned(valid?p.data[6]:0));
+      (unsigned long)(valid?get32(p.data+24):0),(unsigned long)(valid?get32(p.data+28):0),unsigned(valid?p.data[6]:0),peer);
     return true;
   }
   if(logOp(outgoing.op)) {
+    char peer[18];pidlink::formatPeerMac(pidlink::radio.peerAddress(),peer);
     const bool ok=p.op==Op::LogReply;char hexBytes[(kChunk-20)*2+1];const char* digits="0123456789abcdef";
     const size_t length=ok?p.length-20:0;
     for(size_t i=0;i<length;++i){hexBytes[i*2]=digits[p.data[20+i]>>4];hexBytes[i*2+1]=digits[p.data[20+i]&15];}hexBytes[length*2]=0;
-    snprintf(out,size,"{\"type\":\"serial_log\",\"id\":%lu,\"op\":%u,\"offset\":%lu,\"ok\":%s,\"error\":\"%s\",\"hex\":\"%s\",\"dropped\":%lu,\"rx_errors\":%lu,\"baud\":%lu,\"retries\":%lu}",
+    snprintf(out,size,"{\"type\":\"serial_log\",\"id\":%lu,\"op\":%u,\"offset\":%lu,\"ok\":%s,\"error\":\"%s\",\"hex\":\"%s\",\"dropped\":%lu,\"rx_errors\":%lu,\"baud\":%lu,\"retries\":%lu,\"peer_mac\":\"%s\"}",
         static_cast<unsigned long>(p.transfer),unsigned(outgoing.op),static_cast<unsigned long>(p.offset),ok?"true":"false",
         ok?"ok":errorName(Error(p.data[1])),hexBytes,static_cast<unsigned long>(ok?get32(p.data+8):0),
-        static_cast<unsigned long>(ok?get32(p.data+12):0),static_cast<unsigned long>(ok?get32(p.data+16):0),static_cast<unsigned long>(replyRetries));
+        static_cast<unsigned long>(ok?get32(p.data+12):0),static_cast<unsigned long>(ok?get32(p.data+16):0),static_cast<unsigned long>(replyRetries),peer);
     return true;
   }
   if(outgoing.op==Op::MotorStatus||outgoing.op==Op::MotorTarget) {

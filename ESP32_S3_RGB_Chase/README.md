@@ -1,5 +1,7 @@
 # PID 主机本地功能、RGB 与 USB 控制
 
+2026-11-04 完整版 `host_flash`：双击 P 按键切换已登记的从机，OLED 显示例如 `GREEN 1/1`。P 单击不执行操作，转动 P 仍调参。添加颜色身份和新从机的方法见 [从机选择指南](../PID_Workbench/docs/PEER_SELECTION.md)。
+
 项目整体功能及进度见 [主机、从机与上位机功能总览](PROJECT_OVERVIEW.md)。
 
 2026-10-19 主机面板新增：**长按 STEP 2 秒切换整圈 RGB 开关**。按住只切换一次，松手不会额外切色；STEP 短按在松手时切色。关灯后仍可调参、看 OLED、使用 USB 和无线通信，普通旋钮操作不会自动重新亮灯。再次长按恢复原灯效；开关仅保存在本次运行中，重新上电默认开启。使用当前完整功能环境 `host_flash` 编译/上传。USB `!rgb on/off/toggle` 可控制同一开关，`!status` 可查询 `rgb_enabled`、`step_hold_ms`、`step_holds`。

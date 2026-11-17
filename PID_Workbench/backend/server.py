@@ -11,7 +11,7 @@ import secrets
 import sys
 from urllib.parse import parse_qs, urlsplit
 
-from workbench_core import ApiError, DATA_DIR, Engine, VERSION, capabilities, ports, prepare
+from workbench_core import ApiError, DATA_DIR, Engine, VERSION, capabilities, prepare
 
 
 def token(root=DATA_DIR):
@@ -159,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError("not_found", "接口不存在。", 404)
             else:
                 if url.path == "/v1/capabilities": result = capabilities()
-                elif url.path == "/v1/ports": result = ports()
+                elif url.path == "/v1/ports": result = engine.list_ports()
                 elif url.path == "/v1/device": result = engine.device(parse_qs(url.query).get("port", ["auto"])[0])
                 elif url.path == "/v1/serial/status": result = engine.serial_log.status()
                 elif url.path == "/v1/serial/read":

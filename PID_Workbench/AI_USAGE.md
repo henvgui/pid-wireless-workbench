@@ -1,5 +1,7 @@
 # AI 接入与调用约定
 
+2026-11-04 从机选择：主机双击 P 切换已登记从机，OLED / GUI 显示当前名称；设备状态新增 `peer_name`、`peer_mac`、`peer_index`、`peer_count`。烧录工具在预检后将 MAC 带入 Begin 再核对，成功后锁定目标；记录及续传同时检查该 MAC。当前无 HTTP 名单管理接口，登记使用 USB `!peer` 命令，详见 [从机选择指南](docs/PEER_SELECTION.md)。
+
 2026-11-04：Keil 失败窗口支持手动“重新烧录”。脚本可用 `integrations/keil/pid_keil.py --retry-record <attempt.json>` 执行同一流程：先核对原任务，运行中任务续查，明确失败后才新建烧录意图；固件使用原快照，并重新识别 USB。`--resume` 仍只续查原记录。[重试规则](docs/KEIL_DOWNLOAD.md#日志与异常恢复)。
 
 从机 20261103.3：F407 SWD 的 `start_ack` 增加系统复位、Flash 入口/SP 和中断上下文检查，修复下载后应用串口不恢复的问题；HTTP/CLI 请求不变。原始调试可在从机 USB 查询只读缓存 `!starttrace`，`step=6` 为本次启动检查完成，不代表任意目标应用的业务功能正常。[修复与收发验收](docs/UART_RESUME_FIX_20261103.md)。

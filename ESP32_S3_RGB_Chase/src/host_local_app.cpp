@@ -27,7 +27,12 @@ uint32_t lastParameters=0, toastAt=0;
 const char* toast="";
 char previousHeader[32] = {};
 #if defined(PID_LINK_ENABLED)
-char tx[640] = {};
+char tx[1024] = {};
+Preferences peerStorage;
+pidlink::PeerCatalog peers;
+bool peerStorageReady=false,peerConfigurationOk=true;
+uint32_t peerDoubleClicks=0,peerSwitches=0;
+const char* peerFailure="invalid_peer";
 // Host schematic: 3V3 -> R1 1k -> LED2 -> GPIO38 (active LOW).
 constexpr uint8_t kLinkLedPin=38;
 bool linkLedOn=false;
@@ -113,10 +118,10 @@ void stateReply(const char* type="state") {
   hostui::formatValue(p.step,values[3],sizeof(values[3]));
   const char* extra="";
 #if defined(PID_LINK_ENABLED)
-  char wireless[128];
+  char wireless[256],peerMac[18];pidlink::formatPeerMac(peers.mac(peers.active()),peerMac);
   const auto& e=pidlink::radio.engine();
-  snprintf(wireless,sizeof(wireless),",\"wireless\":true,\"link_online\":%s,\"synced\":%s,\"ack_scope\":\"slave\"",
-      e.online(millis())?"true":"false",wirelessSynced(millis())?"true":"false");
+  snprintf(wireless,sizeof(wireless),",\"wireless\":true,\"link_online\":%s,\"synced\":%s,\"ack_scope\":\"slave\",\"peer_name\":\"%s\",\"peer_mac\":\"%s\",\"peer_index\":%u,\"peer_count\":%u",
+      e.online(millis())?"true":"false",wirelessSynced(millis())?"true":"false",pidlink::peerColorName(peers.active()),peerMac,unsigned(peers.index()),unsigned(peers.count()));
   extra=wireless;
 #endif
   queue("{\"type\":\"%s\",\"p\":%s,\"i\":%s,\"d\":%s,\"step\":%s,\"revision\":%lu,"
@@ -129,20 +134,72 @@ void stateReply(const char* type="state") {
 #if defined(PID_LINK_ENABLED)
 void linkReply() {
   const auto& r=pidlink::radio; const auto& e=r.engine(); const uint32_t now=millis();
+  char peerMac[18];pidlink::formatPeerMac(peers.mac(peers.active()),peerMac);
   queue("{\"type\":\"link\",\"enabled\":%s,\"ready\":%s,\"online\":%s,\"synced\":%s,\"encrypted\":true,"
         "\"channel\":1,\"session\":%lu,\"peer_session\":%lu,\"rx_age_ms\":%lu,\"sent\":%lu,\"received\":%lu,"
         "\"retries\":%lu,\"timeouts\":%lu,\"rejected\":%lu,\"dropped\":%lu,\"delivery_failures\":%lu,"
-        "\"radio_error\":%d,\"link_led_pin\":38,\"link_led_on\":%s,\"ack_scope\":\"slave\",\"target_connected\":false}",
+        "\"radio_error\":%d,\"link_led_pin\":38,\"link_led_on\":%s,\"ack_scope\":\"slave\",\"target_connected\":false,\"peer_name\":\"%s\",\"peer_mac\":\"%s\",\"peer_index\":%u,\"peer_count\":%u}",
       r.enabled()?"true":"false",r.ready()?"true":"false",e.online(now)?"true":"false",wirelessSynced(now)?"true":"false",
       static_cast<unsigned long>(e.session()),static_cast<unsigned long>(e.peerSession()),
       static_cast<unsigned long>(e.lastRxAge(now)),static_cast<unsigned long>(r.sent()),
       static_cast<unsigned long>(r.received()),static_cast<unsigned long>(e.retries()),
       static_cast<unsigned long>(e.timeouts()),static_cast<unsigned long>(r.rejected()),
       static_cast<unsigned long>(r.dropped()),static_cast<unsigned long>(r.deliveryFailures()),int(r.error()),
-      linkLedOn?"true":"false");
+      linkLedOn?"true":"false",pidlink::peerColorName(peers.active()),peerMac,unsigned(peers.index()),unsigned(peers.count()));
 }
 #endif
 void showToast(const char* value,uint32_t now) { toast=value; toastAt=now; displayDirty=true; }
+#if defined(PID_LINK_ENABLED)
+char peerToast[24]={};
+void peerFeedback(uint32_t now){snprintf(peerToast,sizeof(peerToast),"%s %u/%u",pidlink::peerColorName(peers.active()),unsigned(peers.index()),unsigned(peers.count()));showToast(peerToast,now);}
+bool storePeers(const pidlink::PeerCatalog& value){uint8_t bytes[pidlink::kPeerCatalogBytes];return peerStorageReady&&value.encode(bytes,sizeof(bytes))&&peerStorage.putBytes("catalog",bytes,sizeof(bytes))==sizeof(bytes);}
+bool applyPeers(const pidlink::PeerCatalog& candidate,uint32_t now){
+  uint8_t oldBytes[pidlink::kPeerCatalogBytes],newBytes[pidlink::kPeerCatalogBytes];peers.encode(oldBytes,sizeof(oldBytes));candidate.encode(newBytes,sizeof(newBytes));
+  if(peerConfigurationOk&&!std::memcmp(oldBytes,newBytes,sizeof(oldBytes))){peerFeedback(now);return true;}
+#if defined(PID_FLASH_ENABLED)
+  if(!pidflash::hostPeerSwitchAllowed(now)){peerFailure="peer_busy";showToast("CLOSE UART/FW",now);return false;}
+#endif
+  const auto& e=pidlink::radio.engine();
+  if(session.requestedRun()||(e.online(now)&&session.runRequest()&&!session.runConfirmed())){peerFailure="stop_before_switch";showToast("STOP FIRST",now);return false;}
+  if(!storePeers(candidate)){peerFailure="peer_storage_failed";showToast("PEER SAVE FAIL",now);return false;}
+  auto& r=pidlink::radio;
+  const bool changed=std::memcmp(peers.mac(peers.active()),candidate.mac(candidate.active()),6)!=0;
+  if(!r.configurePeer(candidate.mac(candidate.active()))||(!r.enabled()&&!r.begin(pidlink::Role::Host))){
+    storePeers(peers);r.configurePeer(peers.mac(peers.active()));peerFailure="peer_radio_failed";showToast("PEER LINK FAIL",now);return false;
+  }
+  peers=candidate;peerConfigurationOk=true;
+  if(changed){++peerSwitches;session.invalidateRunAcknowledgement();previouslyHealthy=false;peerChanges=0;
+#if defined(PID_FLASH_ENABLED)
+    pidflash::hostPeerChanged();
+#endif
+  }
+  linkPending=true;linkSignature=255;displayDirty=true;peerFeedback(now);return true;
+}
+void peersReply(){
+  char entries[768]={};size_t used=0;
+  for(unsigned i=0;i<pidlink::kPeerColors;++i)if(peers.has(uint8_t(i))){char mac[18];pidlink::formatPeerMac(peers.mac(uint8_t(i)),mac);
+    const int n=snprintf(entries+used,sizeof(entries)-used,"%s{\"name\":\"%s\",\"mac\":\"%s\",\"selected\":%s}",used?",":"",pidlink::peerColorName(uint8_t(i)),mac,i==peers.active()?"true":"false");
+    if(n<0||size_t(n)>=sizeof(entries)-used){error("reply_too_long");return;}used+=size_t(n);}
+  queue("{\"type\":\"peers\",\"active\":\"%s\",\"index\":%u,\"count\":%u,\"storage\":%s,\"valid\":%s,\"double_clicks\":%lu,\"switches\":%lu,\"peers\":[%s]}",
+    pidlink::peerColorName(peers.active()),unsigned(peers.index()),unsigned(peers.count()),peerStorageReady?"true":"false",peerConfigurationOk?"true":"false",(unsigned long)peerDoubleClicks,(unsigned long)peerSwitches,entries);
+}
+bool peerCommand(const char* text,uint32_t now){
+  if(std::strncmp(text,"peer",4)||(text[4]&&text[4]!=' '&&text[4]!='\t'))return false;
+  char buffer[128];if(std::strlen(text)>=sizeof(buffer)){error("invalid_peer_command");return true;}std::strcpy(buffer,text);
+  const char* words[5];unsigned count=0;char* save=nullptr;
+  for(char* word=strtok_r(buffer," \t",&save);word;word=strtok_r(nullptr," \t",&save)){if(count==5){error("invalid_peer_command");return true;}words[count++]=word;}
+  if(count==1||(count==2&&!std::strcmp(words[1],"list"))){peersReply();return true;}
+  if(count==2&&!std::strcmp(words[1],"next")){auto candidate=peers;candidate.select(candidate.next());if(applyPeers(candidate,now))peersReply();else error(peerFailure);return true;}
+  pidlink::PeerCatalog candidate=peers;bool valid=false;
+  if(count==2&&!std::strcmp(words[1],"reset")){candidate.defaults();valid=true;}
+  if(count==3||count==4){const int color=pidlink::peerColor(words[2]);
+    if(color>=0&&count==3&&!std::strcmp(words[1],"select"))valid=candidate.select(uint8_t(color));
+    else if(color>=0&&count==3&&!std::strcmp(words[1],"remove"))valid=candidate.remove(uint8_t(color));
+    else if(color>=0&&count==4&&!std::strcmp(words[1],"add")){uint8_t mac[6];valid=pidlink::parsePeerMac(words[3],mac)&&std::memcmp(mac,pidlink::radio.localAddress(),6)&&candidate.put(uint8_t(color),mac);}
+  }
+  if(!valid)error("invalid_or_conflicting_peer");else if(!applyPeers(candidate,now))error(peerFailure);else peersReply();return true;
+}
+#endif
 bool readProfile(hostlocal::Parameters& value) {
   uint8_t bytes[hostlocal::kProfileSize];
   return storageReady && storage.getBytesLength("profile")==sizeof(bytes) &&
@@ -181,8 +238,14 @@ void updateHeader(uint32_t now) {
   else if (!e.synced(now)) mode="W SYNC";
   else mode=session.runRequest()==0?"W LINK":session.requestedRun()?"W RUN ACK":"W STOP ACK";
 #endif
+#if defined(PID_LINK_ENABLED)
+  if(!peerConfigurationOk)snprintf(text,sizeof(text),"PEER CONFIG ERROR");
+  else if(*toast&&uint32_t(now-toastAt)<1500){if(toast==peerToast)snprintf(text,sizeof(text),"%s",peerToast);else snprintf(text,sizeof(text),"%s %s",pidlink::peerColorName(peers.active()),toast);}
+  else snprintf(text,sizeof(text),"%s %u/%u %s %s",pidlink::peerColorName(peers.active()),unsigned(peers.index()),unsigned(peers.count()),mode,session.dirty()?"*":"S");
+#else
   if (*toast && uint32_t(now-toastAt)<1500) snprintf(text,sizeof(text),"%s",toast);
   else snprintf(text,sizeof(text),"%s %s",mode,session.dirty()?"*":"SAVED");
+#endif
   if (std::strcmp(text,previousHeader)) {
     std::strcpy(previousHeader,text);
     hostoled::publishHeader(text);
@@ -253,7 +316,10 @@ void begin(hostui::Controller& ui) {
   digitalWrite(kLinkLedPin,HIGH);
   pinMode(kLinkLedPin,OUTPUT);
   linkLedOn=false;
-  pidlink::radio.begin(pidlink::Role::Host);
+  peers.defaults();peerStorageReady=peerStorage.begin("pid-peers",false);
+  if(peerStorageReady&&peerStorage.isKey("catalog")){uint8_t bytes[pidlink::kPeerCatalogBytes];
+    peerConfigurationOk=peerStorage.getBytesLength("catalog")==sizeof(bytes)&&peerStorage.getBytes("catalog",bytes,sizeof(bytes))==sizeof(bytes)&&peers.decode(bytes,sizeof(bytes));}
+  if(peerConfigurationOk){pidlink::radio.configurePeer(peers.mac(peers.active()));pidlink::radio.begin(pidlink::Role::Host);}
 #if defined(PID_FLASH_ENABLED)
   pidflash::beginHost();
 #endif
@@ -290,6 +356,9 @@ void poll(uint32_t now) {
   pump();
 }
 bool handleCommand(const char* text,uint32_t now) {
+#if defined(PID_LINK_ENABLED)
+  if(peerCommand(text,now))return true;
+#endif
 #if defined(PID_FLASH_ENABLED)
   if(pidflash::hostCommand(text)) {
     if(pidflash::hostLocked())requestRun(false);
@@ -369,5 +438,12 @@ Status status() {
   observe();
   return {storageReady,session.saved(),session.dirty(),session.requestedRun(),session.runConfirmed(),
           session.runRequest(),session.revision()};
+}
+void nextPeer(uint32_t now){
+#if defined(PID_LINK_ENABLED)
+  ++peerDoubleClicks;auto candidate=peers;candidate.select(candidate.next());if(!applyPeers(candidate,now))showToast(!std::strcmp(peerFailure,"stop_before_switch")?"STOP FIRST":"PEER BUSY",now);
+#else
+  (void)now;
+#endif
 }
 }  // namespace hostapp

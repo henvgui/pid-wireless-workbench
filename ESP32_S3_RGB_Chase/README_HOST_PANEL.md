@@ -1,5 +1,7 @@
 # 主机：渐变流水呼吸、旋钮拖影与四参数显示
 
+当前完整无线版 `host_flash` 的 P 按键已用于双击切换从机，P 单击不再切色；下文四个按键均可切色仅适用于保留的灯效验收环境。见 [从机选择指南](../PID_Workbench/docs/PEER_SELECTION.md)。
+
 本文对应保留的灯效验收环境 `host_panel`。当前默认为 [主从无线版](README_WIRELESS.md)，继承本文的 RGB 与旋钮行为。关闭无线的本地功能版见 [本地与 USB 使用说明](README_HOST_LOCAL.md)。本文的 RAM 保存和文本自动回报仅指 `host_panel`。
 
 ## 操作

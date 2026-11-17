@@ -12,4 +12,5 @@ bool handleCommand(const char* text, uint32_t now);
 bool canAcceptCommand();
 bool takeDisplayDirty();
 Status status();
+void nextPeer(uint32_t now);
 }  // namespace hostapp

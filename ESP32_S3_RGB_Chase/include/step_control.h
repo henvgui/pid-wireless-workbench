@@ -85,6 +85,18 @@ class Button {
 };
 
 enum class ButtonEvent : uint8_t { None, Click, Hold };
+enum class ClickEvent : uint8_t { None, Single, Double };
+constexpr uint32_t kDoubleClickMs=350,kClickMaximumMs=600;
+// Confirm single click only after the double-click window; held-at-boot and
+// long presses cannot select another device. No extra click follows a double.
+class DoubleClickButton {
+ public:
+  void begin(bool pressed,uint32_t now);
+  ClickEvent update(bool pressed,uint32_t now);
+ private:
+  bool raw_=false,stable_=false,armed_=false,pending_=false,second_=false;
+  uint32_t changedAt_=0,pressedAt_=0,releasedAt_=0;
+};
 
 // Short clicks fire on release, allowing a hold to consume the whole gesture.
 // A button held during boot/reset must first be released before it is armed.

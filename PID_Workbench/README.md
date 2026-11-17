@@ -1,5 +1,9 @@
 # PID 调试工作台
 
+Windows 10/11 x64 可从 [GitHub Releases](https://github.com/henvgui/pid-wireless-workbench/releases/latest) 下载便携包。[首次连接、无线串口和烧录](docs/WINDOWS_QUICKSTART.md)
+
+2026-11-04：主机双击 P 按键切换已登记从机，P 单击无动作；OLED 和工作台顶部显示当前从机名称。烧录预检将目标 MAC 带入 Begin 核对，任务期间禁止切换。当前为 GREEN，见 [从机选择与登记](docs/PEER_SELECTION.md)。
+
 2026-11-04：Keil 下载失败窗口增加“重新烧录”；失败后保留窗口，点击后重新识别主机并使用原固件快照重试。已在运行或回应丢失的任务先续查，成功后正常返回 Keil。[使用与重试规则](docs/KEIL_DOWNLOAD.md)。
 
 从机 20261103.3：修复 F407 SWD 下载后串口无响应、需整机断电恢复的问题。启动确认增加系统复位和 Flash 程序入口/中断检查；同一 H2 会话连续下载 3 次及 `S` 指令收发均通过。无需改 Keil 或上位机配置。[修复记录](docs/UART_RESUME_FIX_20261103.md)。
@@ -13,6 +17,7 @@
 | 要做的事 | 阅读文档 |
 |---|---|
 | 启动、界面操作、烧录与工程依赖 | 本 README |
+| AI 接手、主从机与工作台升级、Keil 下载 | [AI 操作与升级手册](docs/AI_USER_MANUAL.md) |
 | 给 AI / Codex / Claude 调用 CLI 或本地 API | [AI_USAGE.md](AI_USAGE.md) |
 | H2 双向无线串口、H1 日志、接线与发送命令 | [无线串口操作指南](docs/WIRELESS_SERIAL.md) |
 | Keil 点击 Download 经 ESP-NOW 烧录 | [Keil 接入说明](docs/KEIL_DOWNLOAD.md) |
@@ -62,7 +67,7 @@ Windows 本地上位机，专门服务这套 ESP32 主从机硬件，支持无�
 4. 「开始烧录」直接提交选定操作。任务采用固件快照，读回一致后才发送所选启动请求。
 5. 在日志和「结构化结果」查看结果，可打开任务目录或复制 JSON。按钮执行期间界面保持响应。
 
-本机主机 USB 通常为 COM14，从机 USB 为 COM18；重插可能改变编号，选择「自动识别 ESP32 主机」即可。所有目标接口共用这个主机连接，从机通过 ESP-NOW 接收任务。端口列表只提供主机；从机 USB 用于维护从机固件。
+工作台通过原生 USB 和主机协议识别 ESP32-S3。端口列表提供已识别的主机。连接一台时可选择「自动识别 ESP32 主机」，连接多台时刷新列表并选择实际 COM 端口。从机 USB 用于维护从机固件。
 
 当前芯片目录：STM32F103C8T6、STM32G431CBT6、STM32G431C8T6、STM32G431C6T6、STM32G431KBU6、STM32F407VGT6、STM32F407VET6。F407 默认从机 SWD，无需 BOOT0；F407 UART 亦已适配。F407VET6 的 SWD 烧录与回传已实板通过；VGT6 与 F407 UART ROM 待验收。GD32、其他芯片尚未接入。GUI/API 直接输入仍只接受 BIN，Keil 适配器另支持 AXF/ELF/HEX 转换。
 

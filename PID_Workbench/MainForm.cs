@@ -342,6 +342,7 @@ namespace PidWorkbench
                 if(state.Count==0)return;
                 if(!pNumber.Focused&&!iNumber.Focused&&!dNumber.Focused&&!stepBox.Focused){SetNumber(pNumber,state,"p");SetNumber(iNumber,state,"i");SetNumber(dNumber,state,"d");decimal step;if(Decimal.TryParse(Json.Text(state,"step"),System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out step)){LastReadStep=step.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture);stepBox.SelectedItem=LastReadStep;}}
                 deviceLabel.Text="主机 "+Json.Text(data,"port",SelectedPort());deviceLabel.ForeColor=Ink;
+                string selectedPeer=Json.Text(state,"peer_name");if(!String.IsNullOrEmpty(selectedPeer))deviceLabel.Text+=" · 从机 "+selectedPeer;
                 wirelessLabel.Text=Json.Bool(state,"link_online")?(Json.Bool(state,"synced")?"无线已连接 · 参数已同步":"无线已连接 · 同步中"):"无线未连接";wirelessLabel.ForeColor=Json.Bool(state,"link_online")?Accent:Color.Goldenrod;
                 panelState.Text="主机请求："+(Json.Bool(state,"run_request")?"RUN":"STOP")+"    从机确认："+(Json.Bool(state,"ack")?"已收到":"等待")+"\n参数存储："+(Json.Bool(state,"dirty")?"有未保存变更":"已保存")+"    确认范围：从机";
             } finally {devicePolling=false;lastDevice=DateTime.UtcNow;}

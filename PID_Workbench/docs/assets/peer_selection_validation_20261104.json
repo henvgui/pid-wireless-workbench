@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-04",
+  "feature": "Registered slave selection and color identities",
+  "installed_boards": [
+    {
+      "role": "slave",
+      "identity": "44:1b:f6:8d:10:18",
+      "sha256": "022416e72188e566c32d07da227a8cbe6c60cd0bf942260d8cd061a88247c3bc",
+      "written_and_hash_verified": true
+    },
+    {
+      "role": "host",
+      "identity": "44:1b:f6:8d:10:20",
+      "sha256": "95bcceea5961a3e20eb1dbe1bd2419127a7190a3651f277394ff1f2a0d82a326",
+      "written_and_hash_verified": true
+    }
+  ],
+  "native_tests": {
+    "passed_groups": 19,
+    "failed_groups": 0
+  },
+  "python_tests": {
+    "workbench": 92,
+    "flash_protocol": 33,
+    "slave_upload": 4,
+    "total_passed": 129
+  },
+  "builds_passed": [
+    "host_flash",
+    "slave_flash_psram",
+    "PID_Workbench"
+  ],
+  "checks_passed": [
+    "Single GREEN selection keeps radio session",
+    "Live UART blocks peer switch",
+    "Receiving and ready firmware states block switch",
+    "Wrong peer MAC rejects Begin",
+    "Temporary BLUE route becomes offline",
+    "Unselected GREEN breathes",
+    "Switching back to GREEN resynchronizes",
+    "Temporary BLUE registration removed"
+  ],
+  "target_flash_executed": false,
+  "physical_user_confirmation": {
+    "p_single_click_no_color_change": true,
+    "p_double_click_oled_green_1_of_1": true
+  },
+  "final_peer": {
+    "name": "GREEN",
+    "count": 1,
+    "online": true,
+    "synced": true
+  },
+  "limitations": [
+    "Only one physical GREEN slave was available; BLUE used a deliberately nonexistent MAC.",
+    "No STM32 erase, programming, reset or motor motion in this feature validation."
+  ],
+  "github_push_performed": false
+}

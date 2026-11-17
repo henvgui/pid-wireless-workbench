@@ -31,10 +31,15 @@ bool parse(const char* text, Command& result) {
     {"ping",Kind::Ping},{"info",Kind::Info},{"status",Kind::Status},{"pins",Kind::Pins},
     {"rgb",Kind::Rgb},{"off",Kind::Off},{"auto",Kind::Auto},{"watch",Kind::Watch},{"help",Kind::Help},
     {"link",Kind::Link},{"radio",Kind::Radio},{"swd",Kind::Swd},{"swdcheck",Kind::SwdCheck},
-    {"swdhold",Kind::SwdHold},{"swdrelease",Kind::SwdRelease},{"swdprobe",Kind::SwdProbe},{"swdunprotect",Kind::SwdUnprotect},{"ramcheck",Kind::RamCheck},{"starttrace",Kind::StartTrace}};
+    {"swdhold",Kind::SwdHold},{"swdrelease",Kind::SwdRelease},{"swdprobe",Kind::SwdProbe},{"swdunprotect",Kind::SwdUnprotect},{"ramcheck",Kind::RamCheck},{"starttrace",Kind::StartTrace},{"identity",Kind::Identity}};
   for (const auto& entry:names) if (!std::strcmp(words[0],entry.name)) parsed.kind=entry.kind;
   if (parsed.kind==Kind::Invalid) return false;
-  if (parsed.kind==Kind::Rgb) {
+  if(parsed.kind==Kind::Identity){
+    if(count!=1&&count!=2)return false;
+    if(count==2){const char* const colors[]={"GREEN","BLUE","RED","YELLOW","CYAN","PURPLE","ORANGE","PINK"};
+      for(uint8_t i=0;i<8;++i)if(!std::strcmp(words[1],colors[i]))parsed.identity=i;
+      if(parsed.identity==255)return false;}
+  }else if (parsed.kind==Kind::Rgb) {
     if (count!=4 || !byte(words[1],parsed.red) || !byte(words[2],parsed.green) || !byte(words[3],parsed.blue)) return false;
   } else if (parsed.kind==Kind::SwdUnprotect) {
     if(count!=2||std::strcmp(words[1],"ERASE_ALL_F407VE"))return false;

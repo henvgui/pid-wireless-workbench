@@ -42,7 +42,16 @@ namespace PidWorkbench
         internal const string BaseUrl="http://127.0.0.1:18765";
         internal static readonly string AppDirectory=AppDomain.CurrentDomain.BaseDirectory;
         internal static readonly string DataDirectory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"PIDWorkbench");
-        internal static readonly string Python=Environment.GetEnvironmentVariable("PID_WORKBENCH_PYTHON")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".platformio","penv","Scripts","python.exe");
+        internal static readonly string Python=FindPython();
+
+        private static string FindPython()
+        {
+            string configured=Environment.GetEnvironmentVariable("PID_WORKBENCH_PYTHON");
+            if(!String.IsNullOrEmpty(configured))return configured;
+            string bundled=Path.Combine(AppDirectory,"runtime","python.exe");
+            if(File.Exists(bundled))return bundled;
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".platformio","penv","Scripts","python.exe");
+        }
         private string token;
         private readonly object startLock=new object();
         private Task starting;

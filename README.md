@@ -13,15 +13,24 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
           └─ H1 UART：独立单向日志
 ```
 
+## Windows 下载与连接
+
+从 [GitHub Releases](https://github.com/henvgui/pid-wireless-workbench/releases/latest) 下载 `PID-Workbench-Windows-x64.zip`，完整解压后运行 `PID_Workbench.exe`。便携包内含 Python 和 pyserial。连接已经配对的 ESP32-S3 主机原生 USB，给从机和目标供电，即可在工作台使用无线串口和远程烧录。
+
+首次使用空白 ESP32-S3 时，先按[硬件准备](docs/DEVELOPMENT.md#配对和端口)写入配对的主从固件。具体操作和接线见 [Windows 快速开始](PID_Workbench/docs/WINDOWS_QUICKSTART.md)。
+
 ## 文档入口
 
 | 内容 | 文档 |
 |---|---|
 | 日常界面与使用指南 | [工作台 README](PID_Workbench/README.md) |
+| AI 接手、日常操作、固件和工具升级 | [AI 操作与升级手册](PID_Workbench/docs/AI_USER_MANUAL.md) |
 | 主机、从机原理图与 PCB 可编辑工程 | [硬件工程说明](hardware/README.md) |
 | AI 调用、串口读取游标及重试规则 | [AI 操作指南](PID_Workbench/AI_USAGE.md) |
 | H2 双向串口、H1 日志与接线 | [无线串口操作指南](PID_Workbench/docs/WIRELESS_SERIAL.md) |
+| 双击 P 切换从机、颜色身份与登记 | [从机选择指南](PID_Workbench/docs/PEER_SELECTION.md) |
 | 在 Keil 中点击 Download 无线烧录 | [Keil 接入](PID_Workbench/docs/KEIL_DOWNLOAD.md) |
+| STM32 型号、烧录算法与从机板型 | [维护索引](PID_Workbench/docs/STM32_FLASH_TARGETS.md) |
 | F407 的 SWD 接线 | [F407 接线表](PID_Workbench/docs/F407_SWD_WIRING.md) |
 | 已验证范围、已修问题与限制 | [检查记录](PID_Workbench/docs/PROJECT_AUDIT_20261024.md) |
 | 批量传输速度、丢包及恢复测试 | [2026-11-03 实板记录](PID_Workbench/docs/BULK_VALIDATION_20261103.md) |
@@ -33,7 +42,7 @@ ESP32-S3 无线 PID 调试、STM32 固件烧录与双向串口工作台。主机
 ## 当前功能
 
 - 主机：P/I/D/STEP 编码器、OLED、RUN/STOP、SAVE、本地参数保存、渐变呼吸/拖影 RGB、STEP 长按开关 RGB。
-- 主从：加密 ESP-NOW、状态同步与连接指示。
+- 主从：加密 ESP-NOW、状态同步与连接指示；双击 P 切换已登记从机，OLED 显示颜色名称和序号。P 单击不执行操作。
 - 无线烧录：从机 UART ROM 或 SWD 写入，镜像 SHA256 检查、完整读回校验、任务去重、Keil 接入及进度显示。
 - F407 SWD：SRAM 1 KiB 块烧录、目标侧缓冲 CRC、超时检查和手动旧算法；VET6 同一 10,268 B 镜像的 Keil 任务实测从 9.85 s 缩短至 4.09 s，仍完整读回后启动。
 - 固件传输：支持自动协商 USB 二进制批量和 8 包滑动窗口、乱序接收与缺包补发；旧版设备保留逐包模式。[协议与测试说明](PID_Shared/PIDFlash/BULK_TRANSFER.md)
@@ -76,7 +85,7 @@ $env:PID_WORKBENCH_PYTHON = (Get-Command python).Source
 
 编译后运行 `& .\PID_Workbench\install-desktop.ps1` 创建带专属图标的桌面快捷方式。图标提供 16–256 像素尺寸，源图见 `PID_Workbench/assets/workbench.svg`；可用 `scripts/make_icon.ps1` 重新生成。
 
-以上 ESP32 命令仅编译。接入其他板子前先核对 MAC、USB 身份、端口、引脚和供电，再明确执行上传；当前代码绑定这套已验证的主从硬件。
+以上 ESP32 命令只编译。为另一套同板型 ESP32-S3 配置地址、生成配对密钥及上传，见[硬件准备](docs/DEVELOPMENT.md#配对和端口)。
 
 **配对密钥不会上传 GitHub。** 原电脑已存在的 `PID_Shared/PIDLink/private/pair_keys.h` 保持原样；新克隆中运行生成工具会创建新密钥，主从必须使用同一份密钥并同时更新，不能只更新一侧。
 

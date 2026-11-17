@@ -55,6 +55,9 @@ Adafruit_NeoPixel strip(rgbshow::kLedCount,rgbshow::kPin,NEO_GRB+NEO_KHZ800);
 #if defined(PID_HOST_UI)
 hostui::Controller hostUi;
 stepcontrol::HoldButton stepButton;
+#if defined(PID_LINK_ENABLED)
+stepcontrol::DoubleClickButton peerButton;
+#endif
 uint32_t stepHolds = 0;
 stepcontrol::KnobScene& scene = hostUi.scene();
 #else
@@ -262,6 +265,13 @@ void serviceKnobs(uint32_t now) {
   }
   for (uint8_t i=0;i<stepcontrol::kKnobCount;++i) {
     bool clicked = false;
+#if defined(PID_LINK_ENABLED)
+    if(i==0){const auto event=peerButton.update(digitalRead(knobs[i].sw)==LOW,now);
+      if(event==stepcontrol::ClickEvent::Double)hostapp::nextPeer(now);
+      // P is reserved for peer selection. A single click has no action.
+      clicked=false;
+    }else
+#endif
 #if defined(PID_HOST_UI)
     if (i == 3) {
       const auto event = stepButton.update(digitalRead(knobs[i].sw)==LOW,now);
@@ -438,6 +448,9 @@ void execute() {
     }
 #if defined(PID_HOST_UI)
     stepButton.begin(digitalRead(stepcontrol::kPinSwitch)==LOW,millis());
+#if defined(PID_LINK_ENABLED)
+    peerButton.begin(digitalRead(knobs[0].sw)==LOW,millis());
+#endif
     stepHolds = 0;
 #endif
     dirty = true;
@@ -540,6 +553,9 @@ void setup() {
 #if defined(PID_HOST_UI)
   hostUi.reset(millis());
   stepButton.begin(digitalRead(stepcontrol::kPinSwitch)==LOW,millis());
+#if defined(PID_LINK_ENABLED)
+  peerButton.begin(digitalRead(knobs[0].sw)==LOW,millis());
+#endif
 #if defined(PID_HOST_LOCAL)
   hostapp::begin(hostUi);
 #endif

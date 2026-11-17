@@ -31,6 +31,7 @@
 !/PID_Workbench/docs/assets/bulk_validation_20261103.json
 !/PID_Workbench/docs/assets/ram_validation_20261103.json
 !/PID_Workbench/docs/assets/uart_resume_validation_20261103.json
+!/PID_Workbench/docs/assets/peer_selection_validation_20261104.json
 /PID_Workbench/PID_Workbench.audit.exe.config
 *.pyc
 *.pyo

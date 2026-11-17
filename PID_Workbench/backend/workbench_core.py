@@ -19,11 +19,11 @@ TOOLS = APP_DIR / "backend/protocol"
 if not (TOOLS / "flash_stm32.py").is_file():
     TOOLS = OUTPUTS / "PID_Shared/PIDFlash/tools"
 sys.path.insert(0, str(TOOLS))
-from flash_stm32 import Link, target_profile, validate_image
+from flash_stm32 import Link, discover_hosts, target_profile, usb_role, validate_image
 from serial.tools import list_ports
 from serial_terminal import SerialTerminal
 
-VERSION = "2026.11.03.2"
+VERSION = "2026.11.17"
 DATA_DIR = Path(os.environ.get("PID_WORKBENCH_DATA", str(Path(os.environ.get("LOCALAPPDATA", APP_DIR)) / "PIDWorkbench")))
 CHIPS = [{"id": name, "label": name, "flash_kb": kb, "profile": profile,
           "device_id": ident, "interfaces": ["uart","swd"] if profile.startswith("f407") else ["uart"],
@@ -56,12 +56,11 @@ class ApiError(RuntimeError):
         super().__init__(message)
 
 
-def ports():
-    result = []
-    for port in list_ports.comports():
-        role = {"44:1B:F6:8D:10:20": "host", "44:1B:F6:8D:10:18": "slave"}.get(port.serial_number, "other")
-        result.append({"port": port.device, "description": port.description, "serial_number": port.serial_number, "role": role})
-    return result
+def ports(devices=None):
+    if devices is None:
+        devices = list_ports.comports()
+    return [{"port": port.device, "description": port.description,
+             "serial_number": port.serial_number, "role": usb_role(port)} for port in devices]
 
 
 def capabilities():
@@ -91,7 +90,10 @@ def require_string(value, name, limit=32768):
 
 def resolve_port(value, host=False):
     if value == "auto" and host:
-        return next((p["port"] for p in ports() if p["role"] == "host"), None) or "auto"
+        hosts = [p["port"] for p in ports() if p["role"] == "host"]
+        if len(hosts) > 1:
+            raise ApiError("multiple_hosts", "检测到多台 ESP32 主机，请选择具体端口。")
+        return hosts[0] if hosts else "auto"
     if not isinstance(value, str) or not re.fullmatch(r"COM[1-9][0-9]{0,3}", value.upper()):
         raise ApiError("invalid_port", "请选择具体 COM 串口；无线主机也可以使用 auto。")
     return value.upper()
@@ -290,6 +292,15 @@ class Engine:
         self.serial_log = SerialTerminal(self.gate, Link, host_port, ApiError)
         self.submit_lock = threading.RLock()
         self.cached_state = None
+
+    def list_ports(self):
+        devices = list_ports.comports()
+        if self.gate.acquire(False):
+            try:
+                discover_hosts(devices)
+            finally:
+                self.gate.release()
+        return ports(devices)
 
     def device(self, port="auto"):
         if not self.gate.acquire(False):

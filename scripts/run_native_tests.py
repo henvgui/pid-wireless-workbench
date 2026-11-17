@@ -27,6 +27,7 @@ cases.extend([
     ('bulk', [flash/'tests/bulk_test.cpp', flash/'src/bulk_core.cpp', flash/'src/flash_core.cpp'], [flash/'src']),
     ('slave_protocol', [slave/'tests/protocol_test.cpp', slave/'src/diagnostic_protocol.cpp'], [slave/'include']),
     ('pid_link', [link/'tests/core_test.cpp', link/'src/pid_link_core.cpp'], [link/'src']),
+    ('peer_catalog', [link/'tests/peer_catalog_test.cpp', link/'src/peer_catalog.cpp',link/'src/pid_link_core.cpp'], [link/'src']),
     ('flash_core', [flash/'tests/native_test.cpp', flash/'src/flash_core.cpp', flash/'src/stm32_rom.cpp'], [flash/'src']),
     ('swd', [flash/'tests/swd_test.cpp', flash/'src/flash_core.cpp', flash/'src/swd_programmer.cpp'], [flash/'src']),
     ('ram_loader', [flash/'tests/ram_loader_test.cpp', flash/'src/flash_core.cpp', flash/'src/swd_programmer.cpp'], [flash/'src']),

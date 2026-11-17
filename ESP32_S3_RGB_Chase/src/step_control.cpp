@@ -35,6 +35,30 @@ void HoldButton::begin(bool pressed, uint32_t now) {
   armed_ = reported_ = false;
   changedAt_ = pressedAt_ = now;
 }
+void DoubleClickButton::begin(bool pressed,uint32_t now){
+  raw_=stable_=pressed;armed_=pending_=second_=false;changedAt_=pressedAt_=releasedAt_=now;
+}
+ClickEvent DoubleClickButton::update(bool pressed,uint32_t now){
+  if(pressed!=raw_){raw_=pressed;changedAt_=now;}
+  ClickEvent result=ClickEvent::None;
+  if(raw_!=stable_&&uint32_t(now-changedAt_)>=kButtonDebounceMs){
+    stable_=raw_;
+    if(stable_){pressedAt_=changedAt_;armed_=true;second_=pending_&&uint32_t(pressedAt_-releasedAt_)<=kDoubleClickMs;}
+    else if(armed_){
+      armed_=false;
+      if(uint32_t(changedAt_-pressedAt_)<=kClickMaximumMs){
+        if(second_){pending_=second_=false;return ClickEvent::Double;}
+        pending_=true;releasedAt_=changedAt_;
+      }else second_=false;
+    }
+  }
+  // Reserve a debouncing second press until it can be classified.
+  const bool possibleSecond=raw_&&uint32_t(changedAt_-releasedAt_)<=kDoubleClickMs;
+  if(pending_&&!second_&&!possibleSecond&&uint32_t(now-releasedAt_)>kDoubleClickMs){pending_=false;result=ClickEvent::Single;}
+  // A held second press cancels the double gesture without changing peers.
+  if(second_&&uint32_t(now-pressedAt_)>kClickMaximumMs){second_=false;pending_=false;}
+  return result;
+}
 
 ButtonEvent HoldButton::update(bool pressed, uint32_t now) {
   if (pressed != raw_) {

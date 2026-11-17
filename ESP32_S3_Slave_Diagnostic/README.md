@@ -1,5 +1,7 @@
 # ESP32-S3 从机启动与指令测试
 
+20261104.1：增加颜色身份持久保存，默认 GREEN。`!identity BLUE` 设置身份，`!identity` 查询；自动状态灯连接时以身份色常亮，离线时以身份色快速呼吸。主机双击 P 在已登记从机间选择，名单登记与约束见 [从机选择指南](../PID_Workbench/docs/PEER_SELECTION.md)。新会话不再自动向目标 UART 发送电机控制帧，需要显式电机协议操作启用。
+
 20261103.3：修复 F407 SWD 下载后应用串口不恢复、需整机重启的问题；RUN 阶段确认系统复位、Flash 入口及中断上下文，新增缓存诊断 `!starttrace`。另将 UART ROM 的临时串口对象析构移动到完成通知之前，避免另一核恢复 UART 后被再次关闭。[实板修复记录](../PID_Workbench/docs/UART_RESUME_FIX_20261103.md)。
 
 20261103.2：`slave_flash_psram` / `slave_flash` 增加 F407 SRAM 块烧录器和 `!ramcheck`（复位暂停目标，仅修改 SRAM）。正常烧录保持完整读回和启动确认，详见 [算法与回退说明](../PID_Shared/PIDFlash/RAM_PROGRAMMER.md)。
@@ -30,7 +32,7 @@ platformio run -t upload
 
 基础 `slave_wireless` 环境不包含目标烧录/文本回传扩展，详见 [主从无线使用说明](../ESP32_S3_RGB_Chase/README_WIRELESS.md)。普通编译/烧录现已默认完整 `slave_flash_psram`。任务「从机：烧录诊断版（关闭无线）」可恢复以下 `slave_diagnostic` 测试。下文 2026-10-16 的验证记录对应关闭无线的历史版本。
 
-当前无线版状态灯已调整为：未连接绿色呼吸，连接且收到有效主机参数快照后绿色常亮；RUN/STOP 不改变灯色。`!status` 的自动模式为 `link_breath` / `link_solid`；手动 `!rgb` / `!off` 仍可覆盖灯光，`!auto` 恢复连接指示。
+当前无线版状态灯：未连接时以身份色快速呼吸，连接且收到有效主机参数快照后以身份色常亮（默认 GREEN）；RUN/STOP 不改变灯色。`!status` 的自动模式为 `link_breath` / `link_solid`；手动 `!rgb` / `!off` 仍可覆盖灯光，`!auto` 恢复连接指示。
 
 依据 `C:/Users/twice/Desktop/SCH_Schematic2_2026-10-16.pdf`，2026-10-16。原图副本保存在 [reference/slave_schematic_20261016.pdf](reference/slave_schematic_20261016.pdf)。
 

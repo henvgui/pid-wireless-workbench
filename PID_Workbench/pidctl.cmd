@@ -1,7 +1,7 @@
 @echo off
-if defined PID_WORKBENCH_PYTHON (
-  "%PID_WORKBENCH_PYTHON%" "%~dp0backend\pidctl.py" %*
-) else (
-  "%USERPROFILE%\.platformio\penv\Scripts\python.exe" "%~dp0backend\pidctl.py" %*
-)
+setlocal
+set "pidPython=%PID_WORKBENCH_PYTHON%"
+if not defined pidPython if exist "%~dp0runtime\python.exe" set "pidPython=%~dp0runtime\python.exe"
+if not defined pidPython set "pidPython=%USERPROFILE%\.platformio\penv\Scripts\python.exe"
+"%pidPython%" "%~dp0backend\pidctl.py" %*
 exit /b %errorlevel%

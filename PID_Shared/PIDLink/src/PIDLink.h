@@ -1,5 +1,6 @@
 #pragma once
 #include "pid_link_core.h"
+#include "peer_catalog.h"
 #include "esp_err.h"
 
 namespace pidlink {
@@ -25,12 +26,17 @@ class Radio {
   void setAuxReceiver(AuxReceiver receiver);
   void setAuxTransmitted(AuxTransmitted callback);
   bool sendAux(const uint8_t* bytes,size_t size,bool priority=false);
+  // Host-only, registered peer; call only when upper-layer transactions are idle.
+  bool configurePeer(const uint8_t* mac);
+  const uint8_t* peerAddress()const;
+  const uint8_t* localAddress()const{return localMac_;}
  private:
   Engine engine_;
   Role role_=Role::Host;
   bool ready_=false,enabled_=false;
   esp_err_t error_=ESP_OK;
   uint32_t sent_=0,receivedCount_=0,rejected_=0;
+  uint8_t hostPeer_[6]={},localMac_[6]={};
 };
 extern Radio radio;
 }  // namespace pidlink

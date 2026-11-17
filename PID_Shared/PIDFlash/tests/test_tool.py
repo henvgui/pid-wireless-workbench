@@ -8,7 +8,8 @@ import struct
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 module_path = Path(__file__).resolve().parents[1] / "tools/flash_stm32.py"
 spec = importlib.util.spec_from_file_location("flash_stm32", module_path)
@@ -20,6 +21,36 @@ def image(size=1027, stack=0x20005000):
     data = bytearray(size)
     struct.pack_into("<II", data, 0, stack, 0x08000009)
     return bytes(data)
+
+
+class UsbDiscoveryTests(unittest.TestCase):
+    def test_identifies_a_new_host_and_reuses_its_usb_serial_after_renumbering(self):
+        host = SimpleNamespace(device="COM31", serial_number="02:00:00:00:00:31", vid=0x303a, pid=0x1001)
+        slave = SimpleNamespace(device="COM32", serial_number="02:00:00:00:00:32", vid=0x303a, pid=0x1001)
+        unrelated = SimpleNamespace(device="COM33", serial_number="other", vid=0x0403, pid=0x6001)
+
+        def reply_for(value):
+            def query(command, kind, accept, timeout):
+                self.assertEqual((command, kind), ("!link", "link"))
+                if accept(value):
+                    return value
+                raise TimeoutError()
+            return query
+
+        with patch.object(tool, "_confirmed_hosts", set()), patch.object(tool, "Link") as link:
+            host_link, slave_link = Mock(), Mock()
+            host_link.query.side_effect = reply_for(
+                {"encrypted": True, "ack_scope": "slave", "link_led_pin": 38})
+            slave_link.query.side_effect = reply_for({"encrypted": True})
+            link.side_effect = [host_link, slave_link]
+
+            self.assertEqual(tool.discover_hosts([host, slave, unrelated]), ["COM31"])
+            self.assertEqual([call.args[0] for call in link.call_args_list], ["COM31", "COM32"])
+            host_link.close.assert_called_once()
+            slave_link.close.assert_called_once()
+            host.device = "COM41"
+            self.assertEqual(tool.discover_hosts([host]), ["COM41"])
+            self.assertEqual(link.call_count, 2)
 
 
 class FakeLink(tool.Link):
@@ -44,7 +75,7 @@ class FakeLink(tool.Link):
             self.size = int(words[3])
             self.sha256 = words[5]
             self.profile = {"f103c8":2,"g431":1,"f407vg":3,"f407ve":4}[words[6]]
-            self.interface = words[7] if len(words)==8 else "uart"
+            self.interface = words[7] if len(words)>=8 else "uart"
             self.state = "receiving"
         if op == 2:
             offset = int(words[3])
@@ -63,6 +94,30 @@ class FakeLink(tool.Link):
 
 
 class ToolTests(unittest.TestCase):
+    def test_selected_peer_is_pinned_before_begin(self):
+        class PeerLink(FakeLink):
+            def query(self,command,*args,**kwargs):
+                value=super().query(command,*args,**kwargs)
+                if command=='!get':value.update(peer_mac='44:1B:F6:8D:10:18',peer_name='GREEN')
+                return value
+        with tempfile.TemporaryDirectory() as directory:
+            binary=Path(directory)/'app.bin';binary.write_bytes(image());journal=Path(directory)/'record.json'
+            with patch.object(sys,'argv',['tool',str(binary),'--journal',str(journal)]),patch.object(tool,'Link',PeerLink),contextlib.redirect_stdout(io.StringIO()):tool.main()
+            begins=[c for c in PeerLink.instances[-1].commands if c.startswith('!fw begin')]
+            self.assertEqual(len(begins),1);self.assertTrue(begins[0].endswith(' uart @441BF68D1018'))
+            self.assertEqual(json.loads(journal.read_text())['peer_name'],'GREEN')
+    def test_resume_on_different_slave_stops_before_begin(self):
+        class OtherPeer(FakeLink):
+            def query(self,command,*args,**kwargs):
+                value=super().query(command,*args,**kwargs)
+                if command=='!get':value.update(peer_mac='02:00:00:00:00:02',peer_name='BLUE')
+                return value
+        with tempfile.TemporaryDirectory() as directory:
+            binary=Path(directory)/'app.bin';binary.write_bytes(image());journal=Path(directory)/'old.json'
+            journal.write_text(json.dumps({'id':42,'part':'STM32F103C8T6','size':len(image()),'flash_kb':64,'sha256':hashlib.sha256(image()).hexdigest(),'peer_mac':'44:1B:F6:8D:10:18'}))
+            with patch.object(sys,'argv',['tool',str(binary),'--resume',str(journal),'--journal',str(Path(directory)/'new.json')]),patch.object(tool,'Link',OtherPeer),contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError,'another slave'):tool.main()
+            self.assertFalse(any(c.startswith('!fw') for c in OtherPeer.instances[-1].commands))
     def test_swd_manual_legacy_flag_and_capability_gate(self):
         for supported in (False,True):
             class F407Link(FakeLink):

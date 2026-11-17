@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
+#include <Preferences.h>
 #include <cstdarg>
 #include <cstdio>
 #include <cmath>
@@ -23,7 +24,7 @@ const char* kFirmware="slave_flash_psram";
 #else
 const char* kFirmware="slave_flash";
 #endif
-const char* kVersion="20261103.3";
+const char* kVersion="20261104.1";
 const char* kRadio="espnow";
 #elif defined(PID_LINK_ENABLED)
 const char* kFirmware="slave_wireless";
@@ -39,6 +40,16 @@ constexpr rmt_channel_t kRgbChannel=RMT_CHANNEL_0;
 uint32_t bootId=0, loops=0, pingSequence=0, lastRgb=0, rgbFrames=0, rgbFailures=0;
 esp_err_t rgbError=ESP_ERR_INVALID_STATE;
 bool rgbReady=false, automatic=true;
+Preferences identityStorage;
+uint8_t identityColor=0;
+bool identityStorageReady=false;
+const char* identityName(){
+#if defined(PID_LINK_ENABLED)
+  return pidlink::peerColorName(identityColor);
+#else
+  return "GREEN";
+#endif
+}
 uint8_t red=0,green=0,blue=0;
 rmt_item32_t rgbItems[25] = {};
 TaskHandle_t usbFlushTask=nullptr;
@@ -52,7 +63,7 @@ struct Console {
   char input[128] = {};
   size_t inputSize=0;
   uint32_t lastByte=0,lastWatch=0;
-  char output[512] = {};
+  char output[768] = {};
   size_t outputSize=0,outputOffset=0;
   bool flushRequested=false;
   bool connected() const { return usb ? bool(Serial) : true; }
@@ -152,14 +163,18 @@ const char* targetOutputs() {
 #endif
 }
 void info(Console& console,const char* type="info") {
+  char localMac[18]="UNKNOWN";
+#if defined(PID_LINK_ENABLED)
+  pidlink::formatPeerMac(pidlink::radio.localAddress(),localMac);
+#endif
   console.reply("{\"type\":\"%s\",\"firmware\":\"%s\",\"version\":\"%s\","
       "\"chip\":\"%s\",\"revision\":%u,\"cores\":%u,\"cpu_mhz\":%u,\"flash_bytes\":%lu,"
       "\"psram_initialized\":%s,\"psram_bytes\":%lu,\"free_psram\":%lu,\"boot_id\":\"%08lx\",\"reset_reason\":\"%s\",\"radio\":\"%s\","
-      "\"interface\":\"%s\",\"rgb_pin\":38,\"target_outputs\":\"%s\"}",
+      "\"interface\":\"%s\",\"rgb_pin\":38,\"target_outputs\":\"%s\",\"identity\":\"%s\",\"mac\":\"%s\"}",
       type,kFirmware,kVersion,ESP.getChipModel(),unsigned(ESP.getChipRevision()),unsigned(ESP.getChipCores()),
       unsigned(ESP.getCpuFreqMHz()),static_cast<unsigned long>(ESP.getFlashChipSize()),
       ESP.getPsramSize()?"true":"false",static_cast<unsigned long>(ESP.getPsramSize()),static_cast<unsigned long>(ESP.getFreePsram()),
-      static_cast<unsigned long>(bootId),resetName(),kRadio,console.usb?"usb":"uart0",targetOutputs());
+      static_cast<unsigned long>(bootId),resetName(),kRadio,console.usb?"usb":"uart0",targetOutputs(),identityName(),localMac);
 }
 void status(Console& console) {
   console.reply("{\"type\":\"status\",\"boot_id\":\"%08lx\",\"uptime_ms\":%lu,\"loops\":%lu,"
@@ -198,6 +213,18 @@ void execute(Console& console) {
   }
   using diagnostic::Kind;
   switch (command.kind) {
+    case Kind::Identity:
+#if defined(PID_LINK_ENABLED)
+      if(command.identity!=255){
+        if(!identityStorageReady||identityStorage.putUChar("color",command.identity)!=1){console.reply("{\"type\":\"error\",\"code\":\"identity_storage_failed\"}");break;}
+        identityColor=command.identity;automatic=true;
+      }
+      {char mac[18];pidlink::formatPeerMac(pidlink::radio.localAddress(),mac);
+       console.reply("{\"type\":\"identity\",\"name\":\"%s\",\"color\":%u,\"mac\":\"%s\",\"saved\":%s}",identityName(),unsigned(identityColor),mac,identityStorageReady?"true":"false");}
+#else
+      console.reply("{\"type\":\"error\",\"code\":\"wireless_not_built\"}");
+#endif
+      break;
     case Kind::StartTrace:
 #if defined(PID_FLASH_ENABLED)
       {uint32_t v[8]={};pidflash::swdStartDiagnostics(v,8);
@@ -376,12 +403,14 @@ void updateRgb(uint32_t now) {
   if (uint32_t(now-lastRgb)<20) return;
   lastRgb=now;
   if (automatic) {
-    const uint32_t phase=now%1000;
-    // Unconnected: green breathing. Connected: steady green, including RUN.
-    const float pulse=phase<400 ? std::sin(float(phase)*3.14159265f/400.0f) : 0;
-    red=blue=0; green=uint8_t(12+243*pulse);
+    const float pulse=(1.0f-std::cos(float(now%600)*6.2831853f/600.0f))*0.5f;
+    uint8_t level=uint8_t(12+243*pulse);
 #if defined(PID_LINK_ENABLED)
-    if (linkConnected(now)) green=255;
+    if(linkConnected(now))level=255;
+    uint8_t r,g,b;pidlink::peerColorRgb(identityColor,r,g,b);
+    red=uint8_t((uint16_t(r)*level+127)/255);green=uint8_t((uint16_t(g)*level+127)/255);blue=uint8_t((uint16_t(b)*level+127)/255);
+#else
+    red=blue=0;green=level;
 #endif
   }
   if (!rgbReady) return;
@@ -415,6 +444,8 @@ void setup() {
   pinMode(board::kSwdDirection,INPUT_PULLUP);
   for (uint8_t pin:board::kExternal) pinMode(pin,INPUT);
   bootId=esp_random();
+  identityStorageReady=identityStorage.begin("pid-identity",false);
+  if(identityStorageReady){identityColor=identityStorage.getUChar("color",0);if(identityColor>=8)identityColor=0;}
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);
   xTaskCreatePinnedToCore(usbFlushWorker,"slave_usb_flush",2048,nullptr,1,&usbFlushTask,xPortGetCoreID());
